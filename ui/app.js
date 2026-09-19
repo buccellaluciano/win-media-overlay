@@ -9,7 +9,8 @@ const { listen } = window.__TAURI__.event;
 const liquidCard = document.getElementById("liquidCard");
 const albumArt = document.getElementById("albumArt");
 const artPlaceholder = document.getElementById("artPlaceholder");
-const ambientGlow = document.getElementById("ambientGlow");
+const ambientGlowA = document.getElementById("ambientGlowA");
+const ambientGlowB = document.getElementById("ambientGlowB");
 const titleBox = document.getElementById("titleBox");
 const trackTitle = document.getElementById("trackTitle");
 const trackArtist = document.getElementById("trackArtist");
@@ -57,6 +58,7 @@ const chkAmbientGlow = document.getElementById("chkAmbientGlow");
 const chkHoverReveal = document.getElementById("chkHoverReveal");
 const chkAppVolume = document.getElementById("chkAppVolume");
 const chkDraggable = document.getElementById("chkDraggable");
+const chkRespectFullscreen = document.getElementById("chkRespectFullscreen");
 
 // State
 let isDraggingScrubber = false;
@@ -76,6 +78,86 @@ let appConfig = null;
 let lastThumbnailBase64 = null;
 let lastTrackKey = "";
 let thumbFetchKey = "";
+let glowFront = null; // layer currently visible (A/B), the other cross-fades in
+
+// Cross-fade the ambient glow: set the new art on the hidden layer, then fade layers
+function setAmbientGlow(src) {
+  if (glowFront === null) glowFront = ambientGlowA;
+  const back = glowFront === ambientGlowA ? ambientGlowB : ambientGlowA;
+  if (src) {
+    back.style.backgroundImage = `url(${src})`;
+    back.style.opacity = "0.55";
+    glowFront.style.opacity = "0";
+    glowFront = back;
+  } else {
+    ambientGlowA.style.opacity = "0";
+    ambientGlowB.style.opacity = "0";
+  }
+}
+
+function disableAmbientGlow() {
+  ambientGlowA.style.opacity = "0";
+  ambientGlowB.style.opacity = "0";
+}
+
+// Derive a vivid accent color from the album art and apply it app-wide.
+// ponytail: 24x24 canvas + saturation-weighted average; a real palette extractor (MMCQ) if colors look muddy
+function applyAccentFromArt(src) {
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const size = 24;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, size, size);
+      const data = ctx.getImageData(0, 0, size, size).data;
+      let r = 0, g = 0, b = 0, wsum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] < 128) continue;
+        const max = Math.max(data[i], data[i + 1], data[i + 2]);
+        const min = Math.min(data[i], data[i + 1], data[i + 2]);
+        const sat = (max - min) / 255;
+        const w = 0.15 + sat; // favor colorful pixels, skip near-grays
+        r += data[i] * w;
+        g += data[i + 1] * w;
+        b += data[i + 2] * w;
+        wsum += w;
+      }
+      if (!wsum) return;
+      let cr = r / wsum, cg = g / wsum, cb = b / wsum;
+      // Push saturation up and brightness into a usable range for text/glows
+      const mx = Math.max(cr, cg, cb);
+      if (mx > 0) {
+        const boost = 1.35;
+        cr = Math.min(255, cr * boost);
+        cg = Math.min(255, cg * boost);
+        cb = Math.min(255, cb * boost);
+      }
+      const lum = 0.2126 * cr + 0.7152 * cg + 0.0722 * cb;
+      if (lum < 90) {
+        const f = 120 / Math.max(1, lum);
+        cr = Math.min(255, cr * f);
+        cg = Math.min(255, cg * f);
+        cb = Math.min(255, cb * f);
+      }
+      const root = document.documentElement.style;
+      root.setProperty("--accent-rgb", `${Math.round(cr)}, ${Math.round(cg)}, ${Math.round(cb)}`);
+      root.setProperty("--accent-dark", `rgb(${Math.round(cr * 0.75)}, ${Math.round(cg * 0.75)}, ${Math.round(cb * 0.75)})`);
+    } catch (err) {
+      console.warn("Accent extraction failed:", err);
+    }
+  };
+  img.onerror = () => {};
+  img.src = src;
+}
+
+function resetAccent() {
+  const root = document.documentElement.style;
+  root.removeProperty("--accent-rgb");
+  root.removeProperty("--accent-dark");
+}
 
 function trackKeyOf(state) {
   return `${state.source_app_id || ""}::${state.title || ""}::${state.artist || ""}`;
@@ -177,9 +259,9 @@ function updateMediaUI(state) {
       albumArt.src = state.thumbnail_base64;
       albumArt.classList.add("visible");
       artPlaceholder.classList.add("hidden");
+      applyAccentFromArt(state.thumbnail_base64);
       if (appConfig && appConfig.ambient_glow) {
-        ambientGlow.style.backgroundImage = `url(${state.thumbnail_base64})`;
-        ambientGlow.style.opacity = "0.55";
+        setAmbientGlow(state.thumbnail_base64);
       }
     }
     thumbFetchKey = "";
@@ -189,8 +271,8 @@ function updateMediaUI(state) {
     albumArt.removeAttribute("src");
     albumArt.classList.remove("visible");
     artPlaceholder.classList.remove("hidden");
-    ambientGlow.style.backgroundImage = "none";
-    ambientGlow.style.opacity = "0";
+    setAmbientGlow(null);
+    resetAccent();
     lastThumbnailBase64 = null;
     invoke("get_media_thumbnail").then((b64) => {
       if (b64 && lastTrackKey === tkey) {
@@ -198,9 +280,9 @@ function updateMediaUI(state) {
         albumArt.src = b64;
         albumArt.classList.add("visible");
         artPlaceholder.classList.add("hidden");
+        applyAccentFromArt(b64);
         if (appConfig && appConfig.ambient_glow) {
-          ambientGlow.style.backgroundImage = `url(${b64})`;
-          ambientGlow.style.opacity = "0.55";
+          setAmbientGlow(b64);
         }
       }
     }).catch(() => {});
@@ -702,9 +784,10 @@ async function loadConfigUI() {
     chkAppVolume.checked = appConfig.app_volume !== false;
     chkDraggable.checked = appConfig.draggable !== false;
     applyDraggable(appConfig.draggable !== false);
+    chkRespectFullscreen.checked = appConfig.respect_fullscreen !== false;
 
     if (!chkAmbientGlow.checked) {
-      ambientGlow.style.opacity = "0";
+      disableAmbientGlow();
     }
   } catch (err) {
     console.error("Error loading config:", err);
@@ -725,6 +808,7 @@ btnSaveConfig.addEventListener("click", async () => {
     hover_reveal: chkHoverReveal.checked,
     app_volume: chkAppVolume.checked,
     draggable: chkDraggable.checked,
+    respect_fullscreen: chkRespectFullscreen.checked,
   };
 
   try {
@@ -732,6 +816,12 @@ btnSaveConfig.addEventListener("click", async () => {
     appConfig = newConfig;
     configDirty = false;
     applyDraggable(chkDraggable.checked);
+    // Ambient glow toggle takes effect immediately
+    if (chkAmbientGlow.checked) {
+      if (lastThumbnailBase64) setAmbientGlow(lastThumbnailBase64);
+    } else {
+      disableAmbientGlow();
+    }
     // Volume target may have switched between app/system
     void syncMasterVolume();
 
@@ -791,6 +881,9 @@ document.addEventListener("mousedown", (e) => {
     });
   }
 });
+
+// No browser context menu anywhere in the overlay
+window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // Smooth timeline between backend polls (only while playing, DOM at ~15fps)
 const TICK_DOM_MS = 66;

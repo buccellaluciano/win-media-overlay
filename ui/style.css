@@ -10,8 +10,10 @@
   --text-primary: #ffffff;
   --text-secondary: rgba(240, 240, 250, 0.70);
   --text-tertiary: rgba(240, 240, 250, 0.42);
-  --accent-color: #0A84FF; /* iOS Apple Blue */
-  --accent-glow: rgba(10, 132, 255, 0.45);
+  --accent-rgb: 10, 132, 255; /* driven by the album art at runtime */
+  --accent-color: rgb(var(--accent-rgb));
+  --accent-dark: #0070E0;
+  --accent-glow: rgba(var(--accent-rgb), 0.45);
   --font-apple: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display", "Segoe UI", Roboto, sans-serif;
   --radius-card: 26px;
   --radius-art: 16px;
@@ -36,7 +38,8 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Ambient dynamic colored glow, clipped inside the card */
+/* Ambient dynamic colored glow, clipped inside the card.
+   Two stacked layers cross-fade opacity (background-image itself can't be transitioned). */
 .ambient-glow {
   position: absolute;
   inset: 0;
@@ -44,11 +47,11 @@ html, body {
   background-size: cover;
   background-position: center;
   filter: blur(36px) saturate(220%) brightness(0.95);
-  opacity: 0.55;
+  opacity: 0;
   z-index: 0;
   pointer-events: none;
-  transition: opacity 0.4s ease;
-  will-change: opacity, background-image;
+  transition: opacity 0.9s ease;
+  will-change: opacity;
 }
 
 /* Main Liquid Glass Card */
@@ -167,7 +170,7 @@ select,
 }
 
 .app-badge.open {
-  background: rgba(10, 132, 255, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   border-color: var(--accent-color);
   color: #fff;
 }
@@ -324,9 +327,9 @@ select,
 }
 
 .source-item.active {
-  background: rgba(10, 132, 255, 0.22);
+  background: rgba(var(--accent-rgb), 0.22);
   border-color: var(--accent-color);
-  box-shadow: 0 0 10px rgba(10, 132, 255, 0.25);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.25);
 }
 
 .source-item-info {
@@ -359,8 +362,8 @@ select,
   font-size: 9px;
   font-weight: 600;
   color: var(--accent-color);
-  background: rgba(10, 132, 255, 0.18);
-  border: 1px solid rgba(10, 132, 255, 0.3);
+  background: rgba(var(--accent-rgb), 0.18);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
   padding: 1px 6px;
   border-radius: 8px;
   flex-shrink: 0;
@@ -389,7 +392,7 @@ select,
   top: 10px;
   left: 50%;
   transform: translateX(-50%) translateY(-20px);
-  background: rgba(10, 132, 255, 0.85);
+  background: rgba(var(--accent-rgb), 0.85);
   border: 1px solid rgba(255, 255, 255, 0.3);
   padding: 3px 12px;
   border-radius: 20px;
@@ -836,7 +839,7 @@ select,
 }
 
 .close-settings-btn:hover {
-  background: rgba(10, 132, 255, 0.2);
+  background: rgba(var(--accent-rgb), 0.2);
 }
 
 .settings-content {
@@ -928,7 +931,7 @@ select,
 .bind-badge {
   color: var(--accent-color);
   font-weight: 600;
-  background: rgba(10, 132, 255, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   padding: 2px 7px;
   border-radius: 8px;
 }
@@ -960,9 +963,9 @@ select,
 }
 
 .pos-option.active {
-  background: rgba(10, 132, 255, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   border-color: var(--accent-color);
-  box-shadow: 0 0 12px rgba(10, 132, 255, 0.25);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.25);
 }
 
 .pos-icon {
@@ -1002,7 +1005,7 @@ select,
   height: 22px;
   background: rgba(255, 255, 255, 0.16);
   border-radius: 20px;
-  transition: background 0.2s ease;
+  transition: background 0.6s ease;
 }
 
 .switch-slider::after {
@@ -1026,6 +1029,19 @@ select,
   transform: translateX(16px);
 }
 
+/* Accent-driven elements animate when the album art changes the accent color */
+.pill-btn.active,
+.pos-option.active,
+.source-item.active,
+.source-item-badge,
+.save-btn,
+.close-settings-btn,
+.bind-badge,
+.source-popover-close,
+.app-badge.open {
+  transition: background 0.6s ease, border-color 0.6s ease, color 0.6s ease, box-shadow 0.6s ease;
+}
+
 /* Save Button */
 .settings-actions {
   margin-top: 4px;
@@ -1034,14 +1050,14 @@ select,
 .save-btn {
   width: 100%;
   padding: 9px;
-  background: linear-gradient(135deg, #0A84FF, #0070E0);
+  background: linear-gradient(135deg, var(--accent-color), var(--accent-dark));
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 14px;
   color: #fff;
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(10, 132, 255, 0.35);
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.35);
   transition: all 0.2s ease;
 }
 

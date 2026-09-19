@@ -3,6 +3,7 @@
 
 mod audio_session;
 mod config;
+mod fullscreen;
 mod hotkey;
 mod media;
 mod position;
@@ -180,6 +181,9 @@ fn update_app_config(
         new_config.custom_y,
     );
 
+    // Topmost is managed by the fullscreen watcher; re-assert it on config change
+    let _ = window.set_always_on_top(true);
+
     *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config;
     Ok(())
 }
@@ -277,6 +281,9 @@ fn main() {
                 initial_config.custom_y,
             );
 
+            // Keep the overlay on top; it only steps aside while a fullscreen app is in front
+            let _ = window.set_always_on_top(true);
+
             // Register global hotkey
             let app_handle = app.handle().clone();
             let initial_mods = initial_config.hotkey_modifiers.clone();
@@ -359,21 +366,36 @@ fn main() {
                 }
             });
 
-            // Dynamic Island hover-to-reveal: hidden at top-center, shows when the cursor hits the top strip
+            // Fullscreen-aware topmost + Dynamic Island hover-to-reveal (single cursor poll, no hooks)
             // ponytail: GetCursorPos polling, no global mouse hook (AV-safe, no deps)
             let app_handle_hover = app.handle().clone();
             thread::spawn(move || {
                 let mut outside_since: Option<Instant> = None;
                 let mut pending_hide: Option<Instant> = None;
+                let mut fullscreen_prev = false;
                 loop {
-                    let enabled = {
+                    let (hover_enabled, respect_fullscreen) = {
                         let state = app_handle_hover.state::<AppState>();
                         let conf = state.config.lock().unwrap_or_else(|e| e.into_inner());
-                        conf.hover_reveal && conf.position_preset == "top-center"
+                        (
+                            conf.hover_reveal && conf.position_preset == "top-center",
+                            conf.respect_fullscreen,
+                        )
                     };
+                    let fullscreen_active =
+                        respect_fullscreen && fullscreen::exclusive_fullscreen_active();
 
-                    if enabled {
-                        if let Some(win) = app_handle_hover.get_webview_window("main") {
+                    if let Some(win) = app_handle_hover.get_webview_window("main") {
+                        // Only drop "always on top" while a fullscreen app is in front, so the
+                        // overlay can't steal focus/minimize it. Restore it right after.
+                        if fullscreen_active != fullscreen_prev {
+                            let _ = win.set_always_on_top(!fullscreen_active);
+                            fullscreen_prev = fullscreen_active;
+                            outside_since = None;
+                            pending_hide = None;
+                        }
+
+                        if hover_enabled && !fullscreen_active {
                             let mut cursor = POINT::default();
                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
                                 let visible = win.is_visible().unwrap_or(false);

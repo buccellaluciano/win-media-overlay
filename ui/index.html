@@ -9,8 +9,9 @@
 <body>
   <!-- Main Liquid Glass Card -->
   <div class="liquid-card" id="liquidCard">
-    <!-- Dynamic Ambient Glow Projection (clipped inside the card so it can't bleed out) -->
-    <div class="ambient-glow" id="ambientGlow"></div>
+    <!-- Dynamic Ambient Glow Projection (two layers cross-fade so colors change gradually) -->
+    <div class="ambient-glow" id="ambientGlowA"></div>
+    <div class="ambient-glow" id="ambientGlowB"></div>
 
     <!-- Volume Toast Indicator -->
     <div class="volume-toast" id="volumeToast">🔊 Volumen</div>
@@ -222,6 +223,12 @@
           <label class="toggle-item">
             <span class="toggle-text">Permitir arrastrar la ventana</span>
             <input type="checkbox" id="chkDraggable" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Respetar pantalla completa (no molestar juegos/video)</span>
+            <input type="checkbox" id="chkRespectFullscreen" checked class="ios-switch">
             <span class="switch-slider"></span>
           </label>
 

@@ -26,6 +26,8 @@ pub struct AppConfig {
     pub app_volume: bool, // Slider controls the app's audio session (mixer); falls back to system
     #[serde(default = "d_true")]
     pub draggable: bool, // Allow dragging the window in any position mode
+    #[serde(default = "d_true")]
+    pub respect_fullscreen: bool, // true: stay on top, but step aside while a fullscreen app is in front
 }
 
 fn d_mods() -> Vec<String> { vec!["Control".to_string(), "Shift".to_string()] }
@@ -49,6 +51,7 @@ impl Default for AppConfig {
             hover_reveal: false,
             app_volume: true,
             draggable: true,
+            respect_fullscreen: true,
         }
     }
 }

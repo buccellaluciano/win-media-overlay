@@ -29,6 +29,7 @@ Construida con **Tauri 2 + Rust + Vanilla HTML5/CSS3/JS**, compilada 100% offlin
   - **Arrastrable**: Interruptor para permitir o bloquear el arrastre de la ventana en cualquier modo; la posición libre se recuerda.
 - **Opciones de Comportamiento**:
   - **Icono en la bandeja del sistema (tray)**: clic izquierdo muestra/oculta; clic derecho → *Mostrar / Ocultar* y **Salir** (cierra la app por completo).
+  - **Respetar pantalla completa**: la app queda siempre encima (juegos borderless, ventanas, etc.), pero se aparta automáticamente solo cuando hay una app en **fullscreen exclusivo** (D3D) en primer plano, para no minimizarla; vuelve al salir.
   - Opción de autocerrado/ocultamiento al hacer clic fuera (*Auto-hide on blur*).
   - **Revelar al pasar el ratón** (modo Dynamic Island): se oculta arriba al centro y reaparece al posar el cursor en la franja superior.
   - **Volumen por aplicación** usando el mezclador de Windows (WASAPI), con fallback al volumen del sistema.
@@ -56,7 +57,7 @@ Una vez abierto, presiona **`Ctrl + Shift + Espacio`** para mostrar u ocultar la
 Haz clic en el icono del engranaje en la esquina superior derecha del widget para abrir el panel de configuración:
 1. **Atajo de teclado**: Selecciona qué combinación de teclas quieres usar.
 2. **Posición**: Elige entre *Dynamic Island*, *Bandeja Win11* o *Centro HUD*, y activa o no el arrastre libre.
-3. **Comportamiento**: Resplandor ambiental, auto-ocultado, revelar al pasar el ratón y volumen por aplicación.
+3. **Comportamiento**: Resplandor ambiental, auto-ocultado, revelar al pasar el ratón, volumen por aplicación y *Respetar pantalla completa*.
 4. Pulsa **Guardar Preferencias** para aplicar los cambios de inmediato. La configuración se guarda de forma persistente en `%APPDATA%\WMO\config.json`.
 
 ---
@@ -75,6 +76,7 @@ wmo/
 │   ├── main.rs         # Inicialización, IPC y bucle de eventos
 │   ├── media.rs        # Controlador WinRT GSMTC (lectura de carátulas y reproducción)
 │   ├── audio_session.rs# Volumen por aplicación vía WASAPI (mezclador de Windows)
+│   ├── fullscreen.rs   # Detección de fullscreen exclusivo (D3D) en primer plano
 │   ├── hotkey.rs       # Gestor Win32 RegisterHotKey en segundo plano
 │   ├── position.rs     # Algoritmo de cálculo de posiciones de pantalla
 │   └── config.rs       # Persistencia y gestión de configuración JSON
