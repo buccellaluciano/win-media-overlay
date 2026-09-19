@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use windows::core::Interface;
 use windows::Foundation::TimeSpan;
 use windows::Media::Control::{
@@ -11,6 +12,7 @@ use windows::Media::Control::{
 };
 use windows::Storage::Streams::DataReader;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaState {
@@ -61,6 +63,51 @@ pub struct AudioSourceItem {
 static THUMBNAIL_CACHE: Mutex<Option<(String, String, String, Option<String>)>> = Mutex::new(None);
 // Selected source app ID (if manually selected by user)
 static SELECTED_SOURCE_ID: Mutex<Option<String>> = Mutex::new(None);
+// Exact AUMID of the session we are currently showing (auto mode).
+// Exact (not app-level) because one browser exposes several sessions with different AUMIDs.
+// Only `stabilize` commits it, so a transient pick can never latch.
+static SHOWN_STATE: Mutex<Option<(String, MediaState, Option<(String, Instant)>)>> = Mutex::new(None);
+
+const SESSION_SWITCH_HOLD: Duration = Duration::from_millis(1500);
+
+// The AUMID currently committed for display (used as sticky preference when picking a session)
+fn shown_aumid() -> Option<String> {
+    SHOWN_STATE.lock().ok().and_then(|g| g.as_ref().map(|(k, _, _)| k.clone()))
+}
+
+// Hold the previously shown state while a different session is only transiently reported.
+// Any key change (including "no session") must persist for the hold window to commit.
+fn stabilize(state: MediaState) -> MediaState {
+    let key = state.source_app_id.clone();
+    let Ok(mut g) = SHOWN_STATE.lock() else {
+        return state;
+    };
+    let Some((shown_key, shown_state, pending)) = g.as_mut() else {
+        *g = Some((key, state.clone(), None));
+        return state;
+    };
+    if *shown_key == key {
+        *shown_state = state.clone();
+        *pending = None;
+        return state;
+    }
+    match pending {
+        Some((k, since)) if *k == key => {
+            if since.elapsed() >= SESSION_SWITCH_HOLD {
+                *shown_key = key;
+                *shown_state = state.clone();
+                *pending = None;
+                state
+            } else {
+                shown_state.clone()
+            }
+        }
+        _ => {
+            *pending = Some((key, Instant::now()));
+            shown_state.clone()
+        }
+    }
+}
 
 fn to_base64(data: &[u8]) -> String {
     const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -170,6 +217,30 @@ impl MediaController {
             }
         }
 
+        // Auto mode. Keep the exact session we're showing (a browser exposes several sessions
+        // with different AUMIDs, e.g. Brave vs Brave._crx_...); only switch when it's gone.
+        // Transient flashes are absorbed later by `stabilize`'s debounce.
+        if let Ok(sessions) = manager.GetSessions() {
+            let all: Vec<_> = sessions.into_iter().collect();
+            let aumid_of = |s: &GlobalSystemMediaTransportControlsSession| {
+                s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
+            };
+
+            // 1. Exact session we were showing, if it still exists
+            if let Some(shown) = shown_aumid() {
+                if let Some(s) = all.iter().find(|s| aumid_of(s) == shown) {
+                    return Some(s.clone());
+                }
+            }
+            // 2. Otherwise a playing session, else the first available
+            if let Some(s) = all.iter().find(|s| Self::session_is_playing(s)) {
+                return Some(s.clone());
+            }
+            if let Some(s) = all.first() {
+                return Some(s.clone());
+            }
+        }
+
         // Default fallback to system's current session
         manager.GetCurrentSession().ok()
     }
@@ -177,6 +248,10 @@ impl MediaController {
     pub fn select_source(source_id: Option<String>) {
         if let Ok(mut guard) = SELECTED_SOURCE_ID.lock() {
             *guard = source_id;
+        }
+        // Manual choice must show immediately: drop the auto-selection debounce
+        if let Ok(mut g) = SHOWN_STATE.lock() {
+            *g = None;
         }
         // Invalidate thumbnail cache so new source fetches its own art
         if let Ok(mut cache) = THUMBNAIL_CACHE.lock() {
@@ -397,7 +472,7 @@ impl MediaController {
             }
         }
 
-        MediaState {
+        let state = MediaState {
             has_session: true,
             source_app_id: app_id,
             title,
@@ -410,7 +485,8 @@ impl MediaController {
             position_sec,
             duration_sec,
             thumbnail_base64,
-        }
+        };
+        stabilize(state)
     }
 
     // ponytail: art fetched on demand (async from UI), never on the title/position path; 2MB cap, full-res covers later if needed
@@ -490,7 +566,7 @@ impl MediaController {
     }
 
     pub fn seek_to(seconds: f64) -> Result<bool, String> {
-        if !seconds.is_finite() || seconds < 0.0 {
+        if !seconds.is_finite() || seconds < 0.0 || seconds > 86_400.0 {
             return Err("Invalid position".to_string());
         }
         let session = Self::get_current_session().ok_or("No active media session")?;

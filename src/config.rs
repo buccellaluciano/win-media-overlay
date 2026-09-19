@@ -20,7 +20,7 @@ pub struct AppConfig {
     pub ambient_glow: bool,
     #[serde(default = "d_step")]
     pub volume_step: f64,
-    #[serde(default)]
+    #[serde(default = "d_true")]
     pub hover_reveal: bool, // Dynamic Island: hidden at top-center, reveal on mouse hover
     #[serde(default = "d_true")]
     pub app_volume: bool, // Slider controls the app's audio session (mixer); falls back to system
@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub draggable: bool, // Allow dragging the window in any position mode
     #[serde(default = "d_true")]
     pub respect_fullscreen: bool, // true: stay on top, but step aside while a fullscreen app is in front
+    #[serde(default)]
+    pub lyrics_enabled: bool, // opt-in: fetch synced lyrics from LRCLIB and show them under the player
 }
 
 fn d_mods() -> Vec<String> { vec!["Control".to_string(), "Shift".to_string()] }
@@ -48,10 +50,11 @@ impl Default for AppConfig {
             auto_hide_on_blur: false,
             ambient_glow: true,
             volume_step: 0.05,
-            hover_reveal: false,
+            hover_reveal: true,
             app_volume: true,
             draggable: true,
             respect_fullscreen: true,
+            lyrics_enabled: false,
         }
     }
 }
@@ -80,7 +83,21 @@ pub fn load_config() -> AppConfig {
     let path = get_config_path();
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+            if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
+                // Position presets were removed: the app is always the Dynamic Island (top-center).
+                let mut changed = false;
+                if config.position_preset != "top-center" {
+                    // Legacy "custom" only came from the old drag logic, which broke hover-hide.
+                    // Restore the island behavior when migrating away from it.
+                    if config.position_preset == "custom" {
+                        config.hover_reveal = true;
+                    }
+                    config.position_preset = "top-center".to_string();
+                    changed = true;
+                }
+                if changed {
+                    let _ = save_config(&config);
+                }
                 return config;
             }
         }

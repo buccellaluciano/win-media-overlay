@@ -22,17 +22,14 @@ Construida con **Tauri 2 + Rust + Vanilla HTML5/CSS3/JS**, compilada 100% offlin
   - Atajo por defecto: **`Ctrl + Shift + Espacio`** (o el que elijas).
   - Configurable desde el panel de ajustes de la aplicación con modificadores (`Ctrl`, `Shift`, `Alt`, `Win`) y tecla deseada.
   - Se registra nativamente a nivel de sistema operativo con Win32 `RegisterHotKey`.
-- **Posición en Pantalla Personalizable**:
-  - **Dynamic Island**: Arriba al centro flotando como una cápsula.
-  - **Bandeja Windows 11**: Abajo a la derecha, sobre la bandeja del sistema.
-  - **Centro HUD**: En el centro exacto de la pantalla (estilo Spotlight / HUD).
-  - **Arrastrable**: Interruptor para permitir o bloquear el arrastre de la ventana en cualquier modo; la posición libre se recuerda.
+- **Posición Dynamic Island**: arriba al centro, flotando como una cápsula. Interruptor para permitir o bloquear el arrastre: si la arrastrás, se mueve momentáneamente y vuelve a centrarse arriba (en el monitor donde esté) al mostrarse de nuevo.
 - **Opciones de Comportamiento**:
   - **Icono en la bandeja del sistema (tray)**: clic izquierdo muestra/oculta; clic derecho → *Mostrar / Ocultar* y **Salir** (cierra la app por completo).
+  - **Revelar al pasar el ratón**: icono en la barra superior (a la izquierda del engranaje). Al activarlo, la app se oculta arriba al centro y reaparece al posar el cursor en la franja superior.
   - **Respetar pantalla completa**: la app queda siempre encima (juegos borderless, ventanas, etc.), pero se aparta automáticamente solo cuando hay una app en **fullscreen exclusivo** (D3D) en primer plano, para no minimizarla; vuelve al salir.
+  - **Letras sincronizadas (opt-in)**: muestra la letra en tiempo real bajo el reproductor, con la línea activa resaltada. Fuente: **LRCLIB** (público, sin cuenta). Requiere internet; solo se envían título, artista, álbum y duración. El panel se colapsa solo si la pista no tiene letra sincronizada, y hay una **flecha** en la barra superior para abrirlo/cerrarlo cuando existen letras.
   - Opción de autocerrado/ocultamiento al hacer clic fuera (*Auto-hide on blur*).
-  - **Revelar al pasar el ratón** (modo Dynamic Island): se oculta arriba al centro y reaparece al posar el cursor en la franja superior.
-  - **Volumen por aplicación** usando el mezclador de Windows (WASAPI), con fallback al volumen del sistema.
+  - **Volumen por aplicación** usando el mezclador de Windows (WASAPI): cada app (Tidal, Spotify, Chrome…) conserva su propio nivel. El valor se re-aplica automáticamente al cambiar de pista o hacer seek (los reproductores recrean su sesión de audio y la resetean).
   - Tecla `Escape` para cerrar al instante.
   - Sin bordes de ventana molestos, sin icono estorbando en la barra de tareas (*skipTaskbar*).
 
@@ -56,9 +53,10 @@ Una vez abierto, presiona **`Ctrl + Shift + Espacio`** para mostrar u ocultar la
 
 Haz clic en el icono del engranaje en la esquina superior derecha del widget para abrir el panel de configuración:
 1. **Atajo de teclado**: Selecciona qué combinación de teclas quieres usar.
-2. **Posición**: Elige entre *Dynamic Island*, *Bandeja Win11* o *Centro HUD*, y activa o no el arrastre libre.
-3. **Comportamiento**: Resplandor ambiental, auto-ocultado, revelar al pasar el ratón, volumen por aplicación y *Respetar pantalla completa*.
-4. Pulsa **Guardar Preferencias** para aplicar los cambios de inmediato. La configuración se guarda de forma persistente en `%APPDATA%\WMO\config.json`.
+2. **Comportamiento**: arrastre, resplandor ambiental, auto-ocultado, volumen por aplicación, *Respetar pantalla completa* y *Letras sincronizadas*.
+3. Pulsa **Guardar Preferencias** para aplicar los cambios de inmediato. La configuración se guarda de forma persistente en `%APPDATA%\WMO\config.json`.
+
+En la barra superior, a la izquierda del engranaje, está el icono de **revelar al pasar el ratón** (se activa/desactiva al instante). El icono de **flecha** aparece solo cuando la pista actual tiene letras y sirve para abrir/cerrar el panel de letras.
 
 ---
 

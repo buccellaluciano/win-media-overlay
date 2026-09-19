@@ -1,6 +1,5 @@
 // Per-application volume via the Windows audio session API (WASAPI mixer).
 // ponytail: matches GSMTC app -> WASAPI session by process image name; heuristic, falls back to system volume upstream
-use std::cell::RefCell;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use windows::core::{Interface, PWSTR};
@@ -15,10 +14,6 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-
-thread_local! {
-    static SESSION_CACHE: RefCell<Option<(String, Vec<ISimpleAudioVolume>)>> = const { RefCell::new(None) };
-}
 
 fn expected_stems(app_id: &str) -> Vec<String> {
     let lower = app_id.to_lowercase();
@@ -135,6 +130,8 @@ fn enumerate_sessions() -> Vec<(String, ISimpleAudioVolume)> {
     }
 }
 
+// ponytail: always re-enumerate — players recreate their audio session on track change/seek,
+// so a cached session writes the wrong one and the new session keeps the default volume.
 fn sessions_for_app(app_id: &str) -> Vec<ISimpleAudioVolume> {
     let expected = expected_stems(app_id);
     enumerate_sessions()
@@ -148,22 +145,8 @@ fn sessions_for_app(app_id: &str) -> Vec<ISimpleAudioVolume> {
         .collect()
 }
 
-fn sessions_cached(app_id: &str) -> Vec<ISimpleAudioVolume> {
-    SESSION_CACHE.with(|cell| {
-        if let Some((id, list)) = cell.borrow().as_ref() {
-            if id == app_id && !list.is_empty() {
-                return list.clone();
-            }
-        }
-        let list = sessions_for_app(app_id);
-        // Don't cache an empty match: re-enumerate next call (app may have just started playing)
-        *cell.borrow_mut() = Some((app_id.to_string(), list.clone()));
-        list
-    })
-}
-
 pub fn get_volume(app_id: &str) -> Result<f32, String> {
-    let sessions = sessions_cached(app_id);
+    let sessions = sessions_for_app(app_id);
     if sessions.is_empty() {
         return Err("No audio session for app".to_string());
     }
@@ -185,7 +168,10 @@ pub fn get_volume(app_id: &str) -> Result<f32, String> {
 }
 
 pub fn set_volume(app_id: &str, level: f32) -> Result<(), String> {
-    let sessions = sessions_cached(app_id);
+    if !level.is_finite() {
+        return Err("Invalid volume".to_string());
+    }
+    let sessions = sessions_for_app(app_id);
     if sessions.is_empty() {
         return Err("No audio session for app".to_string());
     }
@@ -203,8 +189,26 @@ pub fn set_volume(app_id: &str, level: f32) -> Result<(), String> {
     }
 }
 
+pub fn set_muted(app_id: &str, muted: bool) -> Result<(), String> {
+    let sessions = sessions_for_app(app_id);
+    if sessions.is_empty() {
+        return Err("No audio session for app".to_string());
+    }
+    let mut ok = false;
+    for s in &sessions {
+        if unsafe { s.SetMute(muted, std::ptr::null()) }.is_ok() {
+            ok = true;
+        }
+    }
+    if ok {
+        Ok(())
+    } else {
+        Err("Set mute failed".to_string())
+    }
+}
+
 pub fn is_muted(app_id: &str) -> Result<bool, String> {
-    let sessions = sessions_cached(app_id);
+    let sessions = sessions_for_app(app_id);
     if sessions.is_empty() {
         return Err("No audio session for app".to_string());
     }
@@ -220,7 +224,7 @@ pub fn is_muted(app_id: &str) -> Result<bool, String> {
 }
 
 pub fn toggle_mute(app_id: &str) -> Result<bool, String> {
-    let sessions = sessions_cached(app_id);
+    let sessions = sessions_for_app(app_id);
     if sessions.is_empty() {
         return Err("No audio session for app".to_string());
     }

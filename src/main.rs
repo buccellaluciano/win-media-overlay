@@ -14,6 +14,7 @@ use hotkey::HotkeyManager;
 use media::{MediaController, MediaState};
 use position::apply_window_position;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,10 +31,22 @@ pub struct AppState {
     pub last_shown: Mutex<Instant>,
 }
 
-// ponytail: coarse debounce for drag-save, per-pixel persist if drag storms matter
-static LAST_POS_SAVE: Mutex<Option<Instant>> = Mutex::new(None);
-// While set and in the future, Moved events are treated as user drags (not programmatic placement)
-static DRAG_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+// Per-app desired volume/mute (in-memory): lets us re-apply after a player recreates its audio session
+static DESIRED_VOLUME: Mutex<Option<HashMap<String, (f32, bool)>>> = Mutex::new(None);
+
+fn desired_volume_set(app_id: &str, level: f32, muted: bool) {
+    if let Ok(mut g) = DESIRED_VOLUME.lock() {
+        g.get_or_insert_with(HashMap::new)
+            .insert(app_id.to_string(), (level, muted));
+    }
+}
+
+fn desired_volume_get(app_id: &str) -> Option<(f32, bool)> {
+    DESIRED_VOLUME
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|m| m.get(app_id).copied()))
+}
 
 // ponytail: async keeps blocking WinRT .get() off the main thread (sync commands run there and deadlock)
 #[tauri::command]
@@ -107,10 +120,17 @@ async fn get_master_volume(state: tauri::State<'_, AppState>) -> Result<f32, Str
 
 #[tauri::command]
 async fn set_master_volume(level: f32, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if !level.is_finite() {
+        return Err("Invalid volume".to_string());
+    }
     if app_volume_enabled(&state) {
         let app_id = MediaController::current_source_app_id();
-        if !app_id.is_empty() && audio_session::set_volume(&app_id, level).is_ok() {
-            return Ok(());
+        if !app_id.is_empty() {
+            let muted = desired_volume_get(&app_id).map(|(_, m)| m).unwrap_or(false);
+            desired_volume_set(&app_id, level, muted);
+            if audio_session::set_volume(&app_id, level).is_ok() {
+                return Ok(());
+            }
         }
     }
     volume::VolumeController::set_volume(level)
@@ -135,11 +155,49 @@ async fn toggle_master_mute(state: tauri::State<'_, AppState>) -> Result<bool, S
         let app_id = MediaController::current_source_app_id();
         if !app_id.is_empty() {
             if let Ok(m) = audio_session::toggle_mute(&app_id) {
+                let level = desired_volume_get(&app_id)
+                    .map(|(l, _)| l)
+                    .or_else(|| audio_session::get_volume(&app_id).ok())
+                    .unwrap_or(1.0);
+                desired_volume_set(&app_id, level, m);
                 return Ok(m);
             }
         }
     }
     volume::VolumeController::toggle_mute()
+}
+
+// Explicit mute set (used when re-applying after a session re-created)
+#[tauri::command]
+async fn set_master_muted(muted: bool, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if app_volume_enabled(&state) {
+        let app_id = MediaController::current_source_app_id();
+        if !app_id.is_empty() {
+            let level = desired_volume_get(&app_id).map(|(l, _)| l).unwrap_or(1.0);
+            desired_volume_set(&app_id, level, muted);
+            if audio_session::set_muted(&app_id, muted).is_ok() {
+                return Ok(());
+            }
+        }
+    }
+    volume::VolumeController::set_mute(muted)
+}
+
+// Re-apply the user's value for the current app after it recreates its audio session
+#[tauri::command]
+async fn reapply_app_volume(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if !app_volume_enabled(&state) {
+        return Ok(());
+    }
+    let app_id = MediaController::current_source_app_id();
+    if app_id.is_empty() {
+        return Ok(());
+    }
+    if let Some((level, muted)) = desired_volume_get(&app_id) {
+        let _ = audio_session::set_volume(&app_id, level);
+        let _ = audio_session::set_muted(&app_id, muted);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -148,10 +206,7 @@ fn start_drag(window: WebviewWindow, state: tauri::State<'_, AppState>) -> Resul
     if !draggable {
         return Err("Dragging disabled".to_string());
     }
-    // Mark the window as user-dragging for a short window so Moved can tell drags from programmatic moves
-    if let Ok(mut g) = DRAG_UNTIL.lock() {
-        *g = Some(Instant::now() + Duration::from_millis(400));
-    }
+    // The window is always the Dynamic Island; a drag only moves it temporarily (recenters on next show)
     window.start_dragging().map_err(|e| e.to_string())
 }
 
@@ -190,6 +245,11 @@ fn update_app_config(
 
 #[tauri::command]
 fn set_window_size(width: f64, height: f64, window: WebviewWindow) -> Result<(), String> {
+    if !width.is_finite() || !height.is_finite() {
+        return Err("Invalid window size".to_string());
+    }
+    let width = width.clamp(100.0, 4000.0);
+    let height = height.clamp(100.0, 4000.0);
     window
         .set_size(Size::Logical(LogicalSize { width, height }))
         .map_err(|e| e.to_string())
@@ -257,6 +317,8 @@ fn main() {
             set_master_volume,
             is_master_muted,
             toggle_master_mute,
+            set_master_muted,
+            reapply_app_volume,
             start_drag,
             get_app_config,
             update_app_config,
@@ -373,6 +435,28 @@ fn main() {
                 let mut outside_since: Option<Instant> = None;
                 let mut pending_hide: Option<Instant> = None;
                 let mut fullscreen_prev = false;
+                // Cursor touching the exact top edge of a monitor, within the island's width
+                let in_reveal_zone = |win: &WebviewWindow, cursor: POINT| -> bool {
+                    let mon = win
+                        .current_monitor()
+                        .ok()
+                        .flatten()
+                        .or_else(|| win.primary_monitor().ok().flatten());
+                    let Some(mon) = mon else {
+                        return false;
+                    };
+                    let sf = mon.scale_factor();
+                    let mp = mon.position();
+                    let ms = mon.size();
+                    let cx = mp.x + ms.width as i32 / 2;
+                    let zone_w = (380.0 * sf) as i32;
+                    // Only the exact edge (2px), where the cursor stops when pushed to the limit
+                    let edge = (2.0 * sf).max(1.0) as i32;
+                    cursor.x >= cx - zone_w / 2
+                        && cursor.x <= cx + zone_w / 2
+                        && cursor.y >= mp.y
+                        && cursor.y <= mp.y + edge
+                };
                 loop {
                     let (hover_enabled, respect_fullscreen) = {
                         let state = app_handle_hover.state::<AppState>();
@@ -400,29 +484,12 @@ fn main() {
                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
                                 let visible = win.is_visible().unwrap_or(false);
                                 if !visible {
-                                    let mon = win
-                                        .current_monitor()
-                                        .ok()
-                                        .flatten()
-                                        .or_else(|| win.primary_monitor().ok().flatten());
-                                    if let Some(mon) = mon {
-                                        let sf = mon.scale_factor();
-                                        let mp = mon.position();
-                                        let ms = mon.size();
-                                        let cx = mp.x + ms.width as i32 / 2;
-                                        let zone_w = (380.0 * sf) as i32;
-                                        let zone_h = (18.0 * sf) as i32;
-                                        if cursor.x >= cx - zone_w / 2
-                                            && cursor.x <= cx + zone_w / 2
-                                            && cursor.y >= mp.y
-                                            && cursor.y <= mp.y + zone_h
-                                        {
-                                            let _ = apply_window_position(&win, "top-center", 0, 0);
-                                            let _ = win.show();
-                                            let _ = app_handle_hover.emit("island-visibility", true);
-                                            outside_since = None;
-                                            pending_hide = None;
-                                        }
+                                    if in_reveal_zone(&win, cursor) {
+                                        let _ = apply_window_position(&win, "top-center", 0, 0);
+                                        let _ = win.show();
+                                        let _ = app_handle_hover.emit("island-visibility", true);
+                                        outside_since = None;
+                                        pending_hide = None;
                                     }
                                 } else if let Some(t) = pending_hide {
                                     // Animating out: finish hiding once the CSS transition has run
@@ -430,17 +497,18 @@ fn main() {
                                         let _ = win.hide();
                                         pending_hide = None;
                                     }
-                                    // Re-enter cancels the hide and animates back in
+                                    // Re-enter (window box or the top edge) cancels the hide
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
-                                    let inside = match (win.outer_position(), win.outer_size()) {
-                                        (Ok(pos), Ok(size)) => {
-                                            cursor.x >= pos.x - margin
-                                                && cursor.x <= pos.x + size.width as i32 + margin
-                                                && cursor.y >= pos.y - margin
-                                                && cursor.y <= pos.y + size.height as i32 + margin
-                                        }
-                                        _ => true,
-                                    };
+                                    let inside = in_reveal_zone(&win, cursor)
+                                        || match (win.outer_position(), win.outer_size()) {
+                                            (Ok(pos), Ok(size)) => {
+                                                cursor.x >= pos.x - margin
+                                                    && cursor.x <= pos.x + size.width as i32 + margin
+                                                    && cursor.y >= pos.y - margin
+                                                    && cursor.y <= pos.y + size.height as i32 + margin
+                                            }
+                                            _ => true,
+                                        };
                                     if inside {
                                         pending_hide = None;
                                         outside_since = None;
@@ -448,15 +516,16 @@ fn main() {
                                     }
                                 } else if !win.is_focused().unwrap_or(false) {
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
-                                    let inside = match (win.outer_position(), win.outer_size()) {
-                                        (Ok(pos), Ok(size)) => {
-                                            cursor.x >= pos.x - margin
-                                                && cursor.x <= pos.x + size.width as i32 + margin
-                                                && cursor.y >= pos.y - margin
-                                                && cursor.y <= pos.y + size.height as i32 + margin
-                                        }
-                                        _ => true,
-                                    };
+                                    let inside = in_reveal_zone(&win, cursor)
+                                        || match (win.outer_position(), win.outer_size()) {
+                                            (Ok(pos), Ok(size)) => {
+                                                cursor.x >= pos.x - margin
+                                                    && cursor.x <= pos.x + size.width as i32 + margin
+                                                    && cursor.y >= pos.y - margin
+                                                    && cursor.y <= pos.y + size.height as i32 + margin
+                                            }
+                                            _ => true,
+                                        };
                                     if inside {
                                         outside_since = None;
                                     } else {
@@ -497,40 +566,9 @@ fn main() {
                         }
                     }
                 }
-                WindowEvent::Moved(physical_pos) => {
-                    let state = app_handle_events.state::<AppState>();
-                    let now = Instant::now();
-                    let user_drag = {
-                        let conf = state.config.lock().unwrap_or_else(|e| e.into_inner());
-                        let draggable = conf.draggable;
-                        let active = DRAG_UNTIL
-                            .lock()
-                            .ok()
-                            .and_then(|g| *g)
-                            .map_or(false, |t| now < t);
-                        draggable && active
-                    };
-                    if user_drag {
-                        if let Ok(mut g) = DRAG_UNTIL.lock() {
-                            *g = Some(now + Duration::from_millis(400));
-                        }
-                        let mut conf = state.config.lock().unwrap_or_else(|e| e.into_inner());
-                        conf.custom_x = physical_pos.x;
-                        conf.custom_y = physical_pos.y;
-                        // Dragging switches to the free position so it persists across show/hide
-                        conf.position_preset = "custom".to_string();
-                        let due = LAST_POS_SAVE
-                            .lock()
-                            .ok()
-                            .map(|g| g.map_or(true, |t| now.duration_since(t) > Duration::from_millis(800)))
-                            .unwrap_or(true);
-                        if due {
-                            if let Ok(mut g) = LAST_POS_SAVE.lock() {
-                                *g = Some(now);
-                            }
-                            let _ = save_config(&conf);
-                        }
-                    }
+                WindowEvent::Moved(_) => {
+                    // The island is always top-center: a drag just moves it temporarily and it
+                    // recenters on the current monitor on the next show/reveal. Nothing to persist.
                 }
                 _ => {}
             });

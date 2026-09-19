@@ -29,6 +29,9 @@ const btnPrev = document.getElementById("btnPrev");
 const btnNext = document.getElementById("btnNext");
 const btnSettings = document.getElementById("btnSettings");
 const btnHide = document.getElementById("btnHide");
+const btnHoverReveal = document.getElementById("btnHoverReveal");
+const btnLyricsToggle = document.getElementById("btnLyricsToggle");
+const iconLyricsChevron = document.getElementById("iconLyricsChevron");
 const settingsPanel = document.getElementById("settingsPanel");
 const btnCloseSettings = document.getElementById("btnCloseSettings");
 const btnSaveConfig = document.getElementById("btnSaveConfig");
@@ -52,13 +55,17 @@ const volLabel = document.getElementById("volLabel");
 const modBtns = document.querySelectorAll(".mod-btn");
 const keySelect = document.getElementById("keySelect");
 const bindBadge = document.getElementById("bindBadge");
-const posOptions = document.querySelectorAll(".pos-option");
 const chkAutoHide = document.getElementById("chkAutoHide");
 const chkAmbientGlow = document.getElementById("chkAmbientGlow");
-const chkHoverReveal = document.getElementById("chkHoverReveal");
 const chkAppVolume = document.getElementById("chkAppVolume");
 const chkDraggable = document.getElementById("chkDraggable");
 const chkRespectFullscreen = document.getElementById("chkRespectFullscreen");
+const chkLyrics = document.getElementById("chkLyrics");
+
+// Lyrics Elements
+const lyricsPanel = document.getElementById("lyricsPanel");
+const lyricsScroll = document.getElementById("lyricsScroll");
+const lyricsLines = document.getElementById("lyricsLines");
 
 // State
 let isDraggingScrubber = false;
@@ -78,7 +85,17 @@ let appConfig = null;
 let lastThumbnailBase64 = null;
 let lastTrackKey = "";
 let thumbFetchKey = "";
+let lastVolumeTrackKey = ""; // detect track changes to re-apply the per-app volume
 let glowFront = null; // layer currently visible (A/B), the other cross-fades in
+
+// Lyrics state
+let lyricsLinesData = []; // [{t, text}]
+let lyricsTrackKey = "";
+let lyricsActiveIdx = -1;
+let lyricsRequestKey = "";
+let lyricsAvailable = false; // there are synced lyrics for the current track
+let lyricsCollapsed = false; // user collapsed the panel with the chevron
+const LYRICS_CACHE = new Map(); // trackKey -> lines[] | null
 
 // Cross-fade the ambient glow: set the new art on the hidden layer, then fade layers
 function setAmbientGlow(src) {
@@ -163,6 +180,196 @@ function trackKeyOf(state) {
   return `${state.source_app_id || ""}::${state.title || ""}::${state.artist || ""}`;
 }
 
+// =========================================================
+// Synced lyrics (LRCLIB, opt-in). Only syncedLyrics are used.
+// =========================================================
+
+function parseLrc(text) {
+  if (!text) return [];
+  const out = [];
+  const re = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
+  for (const raw of text.split(/\r?\n/)) {
+    const stamps = [];
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(raw)) !== null) {
+      const min = parseInt(m[1], 10);
+      const sec = parseInt(m[2], 10);
+      const frac = m[3] ? parseInt(m[3].padEnd(3, "0"), 10) / 1000 : 0;
+      stamps.push(min * 60 + sec + frac);
+    }
+    if (!stamps.length) continue;
+    const content = raw.replace(re, "").trim();
+    for (const t of stamps) out.push({ t, text: content });
+  }
+  out.sort((a, b) => a.t - b.t);
+  // Cap line count: a hostile/huge response must not blow up the DOM
+  return out.length > 5000 ? out.slice(0, 5000) : out;
+}
+
+// Read a JSON response with a size cap (defends against a huge/malicious body)
+async function readJsonCapped(res) {
+  if (!res || !res.ok) return null;
+  const text = await res.text();
+  if (text.length > 2_000_000) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLyrics(state) {
+  const params = new URLSearchParams({
+    track_name: state.title || "",
+    artist_name: state.artist || "",
+    album_name: state.album || "",
+    duration: String(Math.round(state.duration_sec || 0)),
+  });
+  const res = await fetch(`https://lrclib.net/api/get?${params}`);
+  if (res.ok) {
+    const data = await readJsonCapped(res);
+    return data && data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
+  }
+  // Fallback: fuzzy search
+  const q = new URLSearchParams({
+    track_name: state.title || "",
+    artist_name: state.artist || "",
+  });
+  const arr = await readJsonCapped(await fetch(`https://lrclib.net/api/search?${q}`));
+  const hit = Array.isArray(arr) ? arr.find((r) => r && r.syncedLyrics) : null;
+  return hit ? parseLrc(hit.syncedLyrics) : null;
+}
+
+function renderLyrics(lines) {
+  lyricsLines.innerHTML = "";
+  lyricsActiveIdx = -1;
+  const frag = document.createDocumentFragment();
+  lines.forEach((line, i) => {
+    const div = document.createElement("div");
+    div.className = "lyric-line";
+    div.textContent = line.text || "♪"; // textContent: never innerHTML with remote text
+    div.dataset.idx = String(i);
+    frag.appendChild(div);
+  });
+  lyricsLines.appendChild(frag);
+}
+
+// Panel is shown when lyrics exist, the user hasn't collapsed them, and no other panel is open
+function lyricsShouldShow() {
+  return lyricsAvailable && !lyricsCollapsed;
+}
+
+function applyLyricsPanelDom() {
+  const show = lyricsShouldShow() && !isSettingsOpen && !isSourcePopoverOpen;
+  lyricsPanel.classList.toggle("hidden", !show);
+}
+
+// Chevron only appears when there are lyrics; points up (collapse) when expanded, down when collapsed
+function updateLyricsChevron() {
+  btnLyricsToggle.classList.toggle("hidden", !lyricsAvailable);
+  const expanded = lyricsShouldShow();
+  btnLyricsToggle.classList.toggle("active", expanded);
+  iconLyricsChevron.style.transform = expanded ? "rotate(0deg)" : "rotate(180deg)";
+}
+
+// Measure the card and fit the window (same approach as settings; no magic heights)
+function updateLyricsPanelHeight() {
+  if (isSettingsOpen || isSourcePopoverOpen) return; // those own the window size
+  if (!lyricsShouldShow()) {
+    setWindowSize(480, 188);
+    return;
+  }
+  const needed = Math.ceil(liquidCard.getBoundingClientRect().height) + 18;
+  setWindowSize(480, Math.max(188, needed));
+}
+
+function setLyricsAvailable(available) {
+  lyricsAvailable = !!available;
+  if (!lyricsAvailable) {
+    lyricsLines.innerHTML = "";
+    lyricsLinesData = [];
+    lyricsActiveIdx = -1;
+  }
+  updateLyricsChevron();
+  applyLyricsPanelDom();
+  updateLyricsPanelHeight();
+}
+
+function syncLyricsToPosition() {
+  if (!lyricsShouldShow() || !lyricsLinesData.length) return;
+  let idx = -1;
+  for (let i = 0; i < lyricsLinesData.length; i++) {
+    if (lyricsLinesData[i].t <= currentPosition + 0.15) idx = i;
+    else break;
+  }
+  if (idx === lyricsActiveIdx) return;
+  lyricsActiveIdx = idx;
+  const nodes = lyricsLines.children;
+  for (let i = 0; i < nodes.length; i++) {
+    nodes[i].classList.toggle("active", i === idx);
+    nodes[i].classList.toggle("past", i < idx);
+  }
+  if (idx >= 0 && nodes[idx]) {
+    const node = nodes[idx];
+    const target = node.offsetTop - lyricsScroll.clientHeight / 2 + node.offsetHeight / 2;
+    lyricsScroll.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+  }
+}
+
+// Chevron: collapse/expand lyrics (only meaningful when lyrics exist)
+btnLyricsToggle.addEventListener("click", (e) => {
+  e.stopPropagation();
+  lyricsCollapsed = !lyricsCollapsed;
+  updateLyricsChevron();
+  applyLyricsPanelDom();
+  updateLyricsPanelHeight();
+});
+
+function updateLyricsForState(state) {
+  const enabled = appConfig && appConfig.lyrics_enabled;
+  const key = trackKeyOf(state);
+  if (!enabled || !state.has_session || !state.title || state.title === "Sin reproducción") {
+    setLyricsAvailable(false);
+    return;
+  }
+  if (key === lyricsTrackKey) return;
+  lyricsTrackKey = key;
+
+  if (LYRICS_CACHE.has(key)) {
+    const cached = LYRICS_CACHE.get(key);
+    if (cached && cached.length) {
+      lyricsLinesData = cached;
+      renderLyrics(cached);
+      setLyricsAvailable(true);
+      syncLyricsToPosition();
+    } else {
+      setLyricsAvailable(false);
+    }
+    return;
+  }
+
+  lyricsRequestKey = key;
+  setLyricsAvailable(false);
+  fetchLyrics(state)
+    .then((lines) => {
+      const good = lines && lines.length ? lines : null;
+      LYRICS_CACHE.set(key, good);
+      // Ignore stale responses (track changed while fetching)
+      if (lyricsRequestKey !== key || lyricsTrackKey !== key) return;
+      if (good) {
+        lyricsLinesData = good;
+        renderLyrics(good);
+        setLyricsAvailable(true);
+        syncLyricsToPosition();
+      }
+    })
+    .catch(() => {
+      LYRICS_CACHE.set(key, null);
+      if (lyricsRequestKey === key) setLyricsAvailable(false);
+    });
+}
+
 // Centralized window resize: skips redundant OS resizes (each one re-layouts + re-blurs the card)
 async function setWindowSize(width, height) {
   if (height === currentWindowHeight) return;
@@ -172,6 +379,22 @@ async function setWindowSize(width, height) {
   } catch (err) {
     console.error("set_window_size error:", err);
   }
+}
+
+// Usable height on the window's own monitor, in physical px -> logical.
+// ponytail: screen.availHeight in the WebView ignores which monitor/where it sits, so tail got cut.
+async function maxWindowHeight() {
+  try {
+    const appWindow = window.__TAURI__.window.getCurrentWindow();
+    const mon = await appWindow.currentMonitor();
+    const sf = await appWindow.scaleFactor();
+    if (mon && mon.size && sf > 0) {
+      return Math.floor(mon.size.height / sf) - 24;
+    }
+  } catch (err) {
+    // fall through to the browser fallback
+  }
+  return (window.screen && window.screen.availHeight) || 1080;
 }
 let isOptimisticPlaying = null;
 let volumeToastTimeout = null;
@@ -219,6 +442,13 @@ function checkMarquee(element, container) {
 // Update UI with incoming MediaState
 function updateMediaUI(state) {
   if (!state) return;
+
+  // Track changed: the player likely recreated its audio session (volume reset)
+  const vkey = trackKeyOf(state);
+  if (vkey !== lastVolumeTrackKey) {
+    lastVolumeTrackKey = vkey;
+    reapplyVolumeSoon();
+  }
 
   // Title, Artist, Album
   const newTitle = state.title || "Sin reproducción";
@@ -303,6 +533,9 @@ function updateMediaUI(state) {
   }
   // Only run the smooth ticker while actually playing
   if (currentIsPlaying && currentDuration > 0) startTimelineTicker();
+
+  // Synced lyrics follow the track/position
+  updateLyricsForState(state);
 }
 
 // One-shot refresh right after switching source (don't wait for the 350ms poll)
@@ -391,6 +624,24 @@ async function syncMasterVolume() {
   } catch (err) {
     console.error("Volume sync error:", err);
   }
+}
+
+// Players recreate their audio session on track change/seek, which resets its volume.
+// Re-apply our per-app value (backend re-enumerates current sessions) and re-sync the UI.
+async function reapplyVolume() {
+  try {
+    await invoke("reapply_app_volume");
+    await syncMasterVolume();
+  } catch (err) {
+    console.error("Reapply volume error:", err);
+  }
+}
+
+// The new session can appear a bit after the event, so retry shortly after
+function reapplyVolumeSoon() {
+  void reapplyVolume();
+  setTimeout(() => void reapplyVolume(), 500);
+  setTimeout(() => void reapplyVolume(), 1200);
 }
 
 function handleVolumeBarInput(e) {
@@ -504,6 +755,7 @@ async function toggleSourcePopover(open) {
   isSourcePopoverOpen = open !== undefined ? open : !isSourcePopoverOpen;
   if (isSourcePopoverOpen) {
     if (isSettingsOpen) await toggleSettings(false);
+    lyricsPanel.classList.add("hidden");
     liquidCard.classList.add("popover-open");
     appBadge.classList.add("open");
     sourcePopover.classList.remove("hidden");
@@ -514,7 +766,8 @@ async function toggleSourcePopover(open) {
     appBadge.classList.remove("open");
     sourcePopover.classList.add("hidden");
     if (!isSettingsOpen) {
-      await setWindowSize(480, 188);
+      applyLyricsPanelDom();
+      updateLyricsPanelHeight();
     }
   }
 }
@@ -642,6 +895,8 @@ scrubber.addEventListener("mousedown", (e) => {
       const targetSec = handleScrubberMove(upEvt);
       try {
         await invoke("media_seek", { seconds: targetSec });
+        // Seeking can make the player rebuild its audio session
+        reapplyVolumeSoon();
       } catch (err) {
         console.error("Seek error:", err);
       }
@@ -668,13 +923,15 @@ async function toggleSettings(open) {
         await loadConfigUI();
         configDirty = false;
       }
+      // Lyrics panel yields to settings (they must not stack)
+      lyricsPanel.classList.add("hidden");
       settingsPanel.classList.remove("hidden");
       btnSettings.style.transform = "rotate(60deg)";
       btnSettings.style.color = "var(--accent-color)";
       // Fit the window to the actual panel height (DPI/font independent, avoids clipping)
       settingsPanel.style.maxHeight = "none";
       const needed = Math.ceil(liquidCard.getBoundingClientRect().height) + 18;
-      const max = (window.screen.availHeight || 1080) - 40;
+      const max = await maxWindowHeight();
       const height = Math.max(188, Math.min(needed, max));
       if (needed > max) {
         // Not enough screen: cap the panel so it scrolls instead of overflowing
@@ -686,9 +943,10 @@ async function toggleSettings(open) {
     } else {
       settingsPanel.classList.add("hidden");
       settingsPanel.style.maxHeight = "";
-      await setWindowSize(480, 188);
       btnSettings.style.transform = "rotate(0deg)";
       btnSettings.style.color = "";
+      applyLyricsPanelDom();
+      updateLyricsPanelHeight();
     }
   } finally {
     settingsBusy = false;
@@ -732,21 +990,6 @@ modBtns.forEach((btn) => {
 
 keySelect.addEventListener("change", updateBindBadge);
 
-// Position presets buttons
-posOptions.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    posOptions.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-  });
-});
-
-function getSelectedPosition() {
-  const active = document.querySelector(".pos-option.active");
-  if (active) return active.dataset.pos;
-  // No preset selected (e.g. free position from dragging): keep the current one
-  return (appConfig && appConfig.position_preset) || "top-center";
-}
-
 // Enable/disable dragging: custom JS drag + Tauri's native data-tauri-drag-region
 function applyDraggable(enabled) {
   liquidCard.classList.toggle("no-drag", !enabled);
@@ -754,6 +997,24 @@ function applyDraggable(enabled) {
     el.setAttribute("data-tauri-drag-region", enabled ? "" : "false");
   });
 }
+
+// Hover-reveal toggle lives as a header icon, left of the settings gear
+function updateHoverRevealIcon() {
+  const on = !!(appConfig && appConfig.hover_reveal);
+  btnHoverReveal.classList.toggle("active", on);
+}
+
+btnHoverReveal.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (!appConfig) return;
+  appConfig.hover_reveal = !appConfig.hover_reveal;
+  updateHoverRevealIcon();
+  try {
+    await invoke("update_app_config", { newConfig: appConfig });
+  } catch (err) {
+    console.error("Save hover reveal error:", err);
+  }
+});
 
 // Load Configuration into UI
 async function loadConfigUI() {
@@ -772,19 +1033,15 @@ async function loadConfigUI() {
     keySelect.value = appConfig.hotkey_key || "Space";
     updateBindBadge();
 
-    // Position
-    posOptions.forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.pos === appConfig.position_preset);
-    });
-
     // Toggles
     chkAutoHide.checked = !!appConfig.auto_hide_on_blur;
     chkAmbientGlow.checked = appConfig.ambient_glow !== false;
-    chkHoverReveal.checked = !!appConfig.hover_reveal;
     chkAppVolume.checked = appConfig.app_volume !== false;
     chkDraggable.checked = appConfig.draggable !== false;
     applyDraggable(appConfig.draggable !== false);
     chkRespectFullscreen.checked = appConfig.respect_fullscreen !== false;
+    chkLyrics.checked = !!appConfig.lyrics_enabled;
+    updateHoverRevealIcon();
 
     if (!chkAmbientGlow.checked) {
       disableAmbientGlow();
@@ -799,16 +1056,18 @@ btnSaveConfig.addEventListener("click", async () => {
   const newConfig = {
     hotkey_modifiers: getSelectedModifiers(),
     hotkey_key: keySelect.value,
-    position_preset: getSelectedPosition(),
+    // The app is always the Dynamic Island (top-center); legacy "custom" is normalized away
+    position_preset: "top-center",
     custom_x: appConfig ? appConfig.custom_x : 100,
     custom_y: appConfig ? appConfig.custom_y : 100,
     auto_hide_on_blur: chkAutoHide.checked,
     ambient_glow: chkAmbientGlow.checked,
     volume_step: appConfig && Number.isFinite(appConfig.volume_step) ? appConfig.volume_step : 0.05,
-    hover_reveal: chkHoverReveal.checked,
+    hover_reveal: !!(appConfig && appConfig.hover_reveal),
     app_volume: chkAppVolume.checked,
     draggable: chkDraggable.checked,
     respect_fullscreen: chkRespectFullscreen.checked,
+    lyrics_enabled: chkLyrics.checked,
   };
 
   try {
@@ -824,6 +1083,10 @@ btnSaveConfig.addEventListener("click", async () => {
     }
     // Volume target may have switched between app/system
     void syncMasterVolume();
+    // Lyrics toggle changed: re-evaluate for the current track
+    lyricsTrackKey = "";
+    lyricsRequestKey = "";
+    void refreshMediaState();
 
     // Button feedback
     const originalText = btnSaveConfig.innerHTML;
@@ -902,6 +1165,7 @@ function timelineTick(now) {
       const pct = Math.min(100, Math.max(0, (currentPosition / currentDuration) * 100));
       scrubberFill.style.width = `${pct}%`;
       scrubberHead.style.left = `${pct}%`;
+      syncLyricsToPosition();
     }
   }
   if (currentIsPlaying && currentDuration > 0) {

@@ -33,6 +33,17 @@
       </div>
 
       <div class="header-right">
+        <button class="header-btn hidden" id="btnLyricsToggle" title="Mostrar u ocultar letras">
+          <svg id="iconLyricsChevron" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.2" fill="none">
+            <polyline points="6 15 12 9 18 15"></polyline>
+          </svg>
+        </button>
+        <button class="header-btn" id="btnHoverReveal" title="Mostrar al pasar el ratón (Isla Dinámica)">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+            <rect x="7" y="3" width="10" height="18" rx="5"></rect>
+            <line x1="12" y1="7" x2="12" y2="11"></line>
+          </svg>
+        </button>
         <button class="header-btn" id="btnSettings" title="Configuración y Atajos">
           <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
             <circle cx="12" cy="12" r="3"></circle>
@@ -151,6 +162,13 @@
       </div>
     </main>
 
+    <!-- Lyrics Panel (auto-shows only when synced lyrics are available) -->
+    <section class="lyrics-panel hidden" id="lyricsPanel" data-tauri-drag-region>
+      <div class="lyrics-scroll" id="lyricsScroll" data-tauri-drag-region>
+        <div class="lyrics-lines" id="lyricsLines"></div>
+      </div>
+    </section>
+
     <!-- Settings Panel (Slides Down) -->
     <section class="settings-panel hidden" id="settingsPanel">
       <div class="settings-header">
@@ -199,25 +217,6 @@
           </div>
         </div>
 
-        <!-- Position Presets Section -->
-        <div class="setting-group">
-          <label class="setting-label">Posición en Pantalla</label>
-          <div class="position-grid">
-            <button class="pos-option active" data-pos="top-center" id="posTopCenter">
-              <span class="pos-icon">🏝️</span>
-              <span class="pos-name">Dynamic Island</span>
-            </button>
-            <button class="pos-option" data-pos="bottom-right" id="posBottomRight">
-              <span class="pos-icon">↘️</span>
-              <span class="pos-name">Bandeja Win11</span>
-            </button>
-            <button class="pos-option" data-pos="center" id="posCenter">
-              <span class="pos-icon">🎯</span>
-              <span class="pos-name">Centro HUD</span>
-            </button>
-          </div>
-        </div>
-
         <!-- Toggles Section -->
         <div class="setting-group toggles-group">
           <label class="toggle-item">
@@ -245,14 +244,14 @@
           </label>
 
           <label class="toggle-item">
-            <span class="toggle-text">Revelar al pasar el ratón (Isla Dinámica)</span>
-            <input type="checkbox" id="chkHoverReveal" class="ios-switch">
+            <span class="toggle-text">Volumen de la app (mezclador; si no hay sesión usa el del sistema)</span>
+            <input type="checkbox" id="chkAppVolume" checked class="ios-switch">
             <span class="switch-slider"></span>
           </label>
 
           <label class="toggle-item">
-            <span class="toggle-text">Volumen de la app (mezclador; si no hay sesión usa el del sistema)</span>
-            <input type="checkbox" id="chkAppVolume" checked class="ios-switch">
+            <span class="toggle-text">Letras sincronizadas (LRCLIB, requiere internet)</span>
+            <input type="checkbox" id="chkLyrics" class="ios-switch">
             <span class="switch-slider"></span>
           </label>
         </div>
