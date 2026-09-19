@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MediaLiquidGlass",
+  "productName": "WMO",
   "version": "0.1.0",
-  "identifier": "com.liquidglass.mediaoverlay",
+  "identifier": "com.wmo.overlay",
   "build": {
     "frontendDist": "ui"
   },
@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "MediaLiquidGlass",
+        "title": "WMO",
         "label": "main",
         "width": 480,
         "height": 188,

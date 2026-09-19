@@ -55,9 +55,19 @@ impl Default for AppConfig {
 
 pub fn get_config_path() -> PathBuf {
     if let Ok(appdata) = std::env::var("APPDATA") {
-        let dir = PathBuf::from(appdata).join("MediaLiquidGlass");
+        let dir = PathBuf::from(&appdata).join("WMO");
         let _ = fs::create_dir_all(&dir);
-        dir.join("config.json")
+        let path = dir.join("config.json");
+        // ponytail: migrate settings from the pre-rename folder once so nothing is lost
+        if !path.exists() {
+            let old = PathBuf::from(&appdata)
+                .join("MediaLiquidGlass")
+                .join("config.json");
+            if old.exists() {
+                let _ = fs::copy(&old, &path);
+            }
+        }
+        path
     } else {
         PathBuf::from("config.json")
     }

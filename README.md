@@ -1,4 +1,4 @@
-# 🎵 Media Liquid Glass (Win11 Media Overlay)
+# 🎵 WMO (Win11 Media Overlay)
 
 Una interfaz flotante elegante, ultraligera y moderna estilo **Liquid Glass de iOS / VisionOS** para controlar la reproducción de música en Windows 11, reemplazando la tosca barra de tareas.
 
@@ -44,7 +44,7 @@ Puedes iniciar la aplicación directamente de dos formas:
 1. **Haciendo doble clic en `run.bat`** dentro de la carpeta del proyecto.
 2. O ejecutando directamente el binario compilado:
    ```powershell
-   .\target\release\win-media-overlay.exe
+   .\target\release\wmo.exe
    ```
 
 Una vez abierto, presiona **`Ctrl + Shift + Espacio`** para mostrar u ocultar la interfaz en cualquier momento, incluso si estás jugando o navegando en otra ventana.
@@ -57,14 +57,14 @@ Haz clic en el icono del engranaje en la esquina superior derecha del widget par
 1. **Atajo de teclado**: Selecciona qué combinación de teclas quieres usar.
 2. **Posición**: Elige entre *Dynamic Island*, *Bandeja Win11* o *Centro HUD*, y activa o no el arrastre libre.
 3. **Comportamiento**: Resplandor ambiental, auto-ocultado, revelar al pasar el ratón y volumen por aplicación.
-4. Pulsa **Guardar Preferencias** para aplicar los cambios de inmediato. La configuración se guarda de forma persistente en `%APPDATA%\MediaLiquidGlass\config.json`.
+4. Pulsa **Guardar Preferencias** para aplicar los cambios de inmediato. La configuración se guarda de forma persistente en `%APPDATA%\WMO\config.json`.
 
 ---
 
 ## 📁 Estructura del Proyecto
 
 ```
-win-media-overlay/
+wmo/
 ├── Cargo.toml          # Configuración de Rust y dependencias WinRT / Tauri
 ├── build.rs            # Script de compilación de Tauri
 ├── tauri.conf.json     # Configuración de ventana (transparente, sin bordes)

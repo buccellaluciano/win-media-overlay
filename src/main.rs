@@ -298,7 +298,7 @@ fn main() {
                 let mut tray = TrayIconBuilder::new()
                     .menu(&menu)
                     .show_menu_on_left_click(false)
-                    .tooltip("Media Liquid Glass")
+                    .tooltip("WMO")
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "toggle" => toggle_main_window(app),
                         "quit" => app.exit(0),
