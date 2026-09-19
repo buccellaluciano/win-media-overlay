@@ -64,6 +64,9 @@ let currentDuration = 0;
 let currentPosition = 0;
 let currentIsPlaying = false;
 let isSettingsOpen = false;
+let settingsBusy = false;
+let configDirty = false;
+let currentWindowHeight = 188;
 let isSourcePopoverOpen = false;
 let selectedSourceId = null;
 let currentMasterVolume = 0.5;
@@ -76,6 +79,17 @@ let thumbFetchKey = "";
 
 function trackKeyOf(state) {
   return `${state.source_app_id || ""}::${state.title || ""}::${state.artist || ""}`;
+}
+
+// Centralized window resize: skips redundant OS resizes (each one re-layouts + re-blurs the card)
+async function setWindowSize(width, height) {
+  if (height === currentWindowHeight) return;
+  currentWindowHeight = height;
+  try {
+    await invoke("set_window_size", { width, height });
+  } catch (err) {
+    console.error("set_window_size error:", err);
+  }
 }
 let isOptimisticPlaying = null;
 let volumeToastTimeout = null;
@@ -411,18 +425,14 @@ async function toggleSourcePopover(open) {
     liquidCard.classList.add("popover-open");
     appBadge.classList.add("open");
     sourcePopover.classList.remove("hidden");
-    try {
-      await invoke("set_window_size", { width: 480, height: 260 });
-    } catch (e) {}
+    await setWindowSize(480, 260);
     await loadAudioSources();
   } else {
     liquidCard.classList.remove("popover-open");
     appBadge.classList.remove("open");
     sourcePopover.classList.add("hidden");
     if (!isSettingsOpen) {
-      try {
-        await invoke("set_window_size", { width: 480, height: 188 });
-      } catch (e) {}
+      await setWindowSize(480, 188);
     }
   }
 }
@@ -562,18 +572,24 @@ scrubber.addEventListener("mousedown", (e) => {
   window.addEventListener("mouseup", onMouseUp);
 });
 
-// Settings Drawer Toggle
+// Settings Drawer Toggle (guarded: rapid clicks must not stack window resizes)
 async function toggleSettings(open) {
-  isSettingsOpen = open !== undefined ? open : !isSettingsOpen;
-  if (isSettingsOpen) {
-    if (isSourcePopoverOpen) toggleSourcePopover(false);
-    // Re-read config: dragging may have switched the position to the free/custom one
-    await loadConfigUI();
-    settingsPanel.classList.remove("hidden");
-    btnSettings.style.transform = "rotate(60deg)";
-    btnSettings.style.color = "var(--accent-color)";
-    // Fit the window to the actual panel height (DPI/font independent, avoids clipping)
-    requestAnimationFrame(async () => {
+  const target = open !== undefined ? open : !isSettingsOpen;
+  if (settingsBusy || target === isSettingsOpen) return;
+  settingsBusy = true;
+  isSettingsOpen = target;
+  try {
+    if (isSettingsOpen) {
+      if (isSourcePopoverOpen) await toggleSourcePopover(false);
+      // Only re-read config when something changed it (dragging)
+      if (configDirty) {
+        await loadConfigUI();
+        configDirty = false;
+      }
+      settingsPanel.classList.remove("hidden");
+      btnSettings.style.transform = "rotate(60deg)";
+      btnSettings.style.color = "var(--accent-color)";
+      // Fit the window to the actual panel height (DPI/font independent, avoids clipping)
       settingsPanel.style.maxHeight = "none";
       const needed = Math.ceil(liquidCard.getBoundingClientRect().height) + 18;
       const max = (window.screen.availHeight || 1080) - 40;
@@ -584,18 +600,16 @@ async function toggleSettings(open) {
         const other = needed - 18 - panelH;
         settingsPanel.style.maxHeight = `${Math.max(140, max - other - 18)}px`;
       }
-      try {
-        await invoke("set_window_size", { width: 480, height });
-      } catch (err) {
-        console.error("Resize settings error:", err);
-      }
-    });
-  } else {
-    settingsPanel.classList.add("hidden");
-    settingsPanel.style.maxHeight = "";
-    await invoke("set_window_size", { width: 480, height: 188 });
-    btnSettings.style.transform = "rotate(0deg)";
-    btnSettings.style.color = "";
+      await setWindowSize(480, height);
+    } else {
+      settingsPanel.classList.add("hidden");
+      settingsPanel.style.maxHeight = "";
+      await setWindowSize(480, 188);
+      btnSettings.style.transform = "rotate(0deg)";
+      btnSettings.style.color = "";
+    }
+  } finally {
+    settingsBusy = false;
   }
 }
 
@@ -716,6 +730,7 @@ btnSaveConfig.addEventListener("click", async () => {
   try {
     await invoke("update_app_config", { newConfig });
     appConfig = newConfig;
+    configDirty = false;
     applyDraggable(chkDraggable.checked);
     // Volume target may have switched between app/system
     void syncMasterVolume();
@@ -769,6 +784,8 @@ document.addEventListener("mousedown", (e) => {
     e.target.closest(".art-container") ||
     e.target === liquidCard
   ) {
+    // A drag may change the saved position; refresh config next time settings opens
+    configDirty = true;
     invoke("start_drag").catch((err) => {
       console.warn("start_drag error:", err);
     });

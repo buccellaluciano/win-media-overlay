@@ -1,0 +1,21 @@
+# Rust / Cargo
+/target
+**/*.rs.bk
+
+# Tauri generated schemas
+/gen
+
+# Local shareable builds
+/dist
+
+# Runtime artifacts
+panic.log
+output.log
+config.json
+wmo-debug.log
+*.tmp
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

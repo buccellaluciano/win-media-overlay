@@ -17,6 +17,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, LogicalSize, Manager, Size, WebviewWindow, WindowEvent};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
@@ -195,21 +197,29 @@ fn hide_window(window: WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn toggle_window(window: WebviewWindow, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let is_visible = window.is_visible().unwrap_or(false);
-    if is_visible {
-        let _ = window.hide();
+fn toggle_window(window: WebviewWindow) -> Result<(), String> {
+    toggle_main_window(window.app_handle());
+    Ok(())
+}
+
+// Shared show/hide used by the hotkey, the tray and the IPC command
+fn toggle_main_window(app: &tauri::AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    if win.is_visible().unwrap_or(false) {
+        let _ = win.hide();
     } else {
+        let state = app.state::<AppState>();
         *state.last_shown.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
         let conf = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let _ = apply_window_position(&window, &conf.position_preset, conf.custom_x, conf.custom_y);
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        let _ = apply_window_position(&win, &conf.position_preset, conf.custom_x, conf.custom_y);
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
         // Ensure the card isn't left in the island "out" state after being shown again
-        let _ = window.emit("island-visibility", true);
+        let _ = app.emit("island-visibility", true);
     }
-    Ok(())
 }
 
 fn main() {
@@ -268,39 +278,47 @@ fn main() {
             );
 
             // Register global hotkey
-            let window_clone = window.clone();
             let app_handle = app.handle().clone();
             let initial_mods = initial_config.hotkey_modifiers.clone();
             let initial_key = initial_config.hotkey_key.clone();
 
-            let hotkey_manager = Arc::new(HotkeyManager::new(
-                initial_mods,
-                initial_key,
-                move || {
-                    let is_vis = window_clone.is_visible().unwrap_or(false);
-                    if is_vis {
-                        let _ = window_clone.hide();
-                    } else {
-                        let state = app_handle.state::<AppState>();
-                        *state.last_shown.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
-                        let conf = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                        let _ = apply_window_position(
-                            &window_clone,
-                            &conf.position_preset,
-                            conf.custom_x,
-                            conf.custom_y,
-                        );
-                        let _ = window_clone.show();
-                        let _ = window_clone.unminimize();
-                        let _ = window_clone.set_focus();
-                        // Ensure the card isn't left in the island "out" state after being shown again
-                        let _ = app_handle.emit("island-visibility", true);
-                    }
-                },
-            ));
+            let hotkey_manager = Arc::new(HotkeyManager::new(initial_mods, initial_key, move || {
+                toggle_main_window(&app_handle);
+            }));
 
             let state = app.state::<AppState>();
             *state.hotkey_mgr.lock().unwrap_or_else(|e| e.into_inner()) = Some(hotkey_manager);
+
+            // Tray icon: show/hide + a real "Salir" (the window only hides otherwise)
+            {
+                let toggle_item =
+                    MenuItem::with_id(app, "toggle", "Mostrar / Ocultar", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&toggle_item, &quit_item])?;
+                let mut tray = TrayIconBuilder::new()
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .tooltip("Media Liquid Glass")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "toggle" => toggle_main_window(app),
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            toggle_main_window(tray.app_handle());
+                        }
+                    });
+                if let Some(icon) = app.handle().default_window_icon().cloned() {
+                    tray = tray.icon(icon);
+                }
+                app.manage(tray.build(app)?);
+            }
 
             // Background media polling loop
             let app_handle_polling = app.handle().clone();

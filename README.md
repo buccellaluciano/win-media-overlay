@@ -28,6 +28,7 @@ Construida con **Tauri 2 + Rust + Vanilla HTML5/CSS3/JS**, compilada 100% offlin
   - **Centro HUD**: En el centro exacto de la pantalla (estilo Spotlight / HUD).
   - **Arrastrable**: Interruptor para permitir o bloquear el arrastre de la ventana en cualquier modo; la posición libre se recuerda.
 - **Opciones de Comportamiento**:
+  - **Icono en la bandeja del sistema (tray)**: clic izquierdo muestra/oculta; clic derecho → *Mostrar / Ocultar* y **Salir** (cierra la app por completo).
   - Opción de autocerrado/ocultamiento al hacer clic fuera (*Auto-hide on blur*).
   - **Revelar al pasar el ratón** (modo Dynamic Island): se oculta arriba al centro y reaparece al posar el cursor en la franja superior.
   - **Volumen por aplicación** usando el mezclador de Windows (WASAPI), con fallback al volumen del sistema.
