@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Liquid Glass</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Main Liquid Glass Card -->
+  <div class="liquid-card" id="liquidCard">
+    <!-- Dynamic Ambient Glow Projection (clipped inside the card so it can't bleed out) -->
+    <div class="ambient-glow" id="ambientGlow"></div>
+
+    <!-- Volume Toast Indicator -->
+    <div class="volume-toast" id="volumeToast">🔊 Volumen</div>
+
+    <!-- Top Pill Bar (Draggable Region) -->
+    <header class="card-header" data-tauri-drag-region>
+      <div class="header-left" data-tauri-drag-region>
+        <button class="app-badge" id="appBadge" title="Seleccionar fuente de audio (Spotify, Chrome, Edge...)">
+          <span class="badge-dot"></span>
+          <span class="badge-name" id="badgeName">Windows Media</span>
+          <svg class="badge-chevron" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="header-center" data-tauri-drag-region>
+        <div class="island-indicator"></div>
+      </div>
+
+      <div class="header-right">
+        <button class="header-btn" id="btnSettings" title="Configuración y Atajos">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+        <button class="header-btn" id="btnHide" title="Ocultar (o usa el Bind global)">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.2" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Audio Source Selector Popover -->
+    <div class="source-popover hidden" id="sourcePopover">
+      <div class="source-popover-header">
+        <span class="source-popover-title">Fuentes de Audio Activas</span>
+        <button class="source-popover-close" id="btnCloseSourcePopover" title="Cerrar">✕</button>
+      </div>
+      <div class="source-list" id="sourceList">
+        <!-- Injected dynamically via JS -->
+      </div>
+    </div>
+
+    <!-- Player Main Section -->
+    <main class="player-body" id="playerBody">
+      <!-- Album Artwork -->
+      <div class="art-container" id="artContainer">
+        <img class="album-art" id="albumArt" src="" alt="Portada del álbum">
+        <div class="art-placeholder" id="artPlaceholder">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Track Info & Controls -->
+      <div class="content-container">
+        <!-- Title and Artist -->
+        <div class="metadata-wrapper" data-tauri-drag-region>
+          <div class="track-title-box" id="titleBox">
+            <span class="track-title" id="trackTitle">Sin reproducción</span>
+          </div>
+          <div class="track-sub-box">
+            <span class="track-artist" id="trackArtist">Inicia tu música</span>
+            <span class="sub-separator" id="subSep">•</span>
+            <span class="track-album" id="trackAlbum">Windows 11</span>
+          </div>
+        </div>
+
+        <!-- Scrubber Timeline -->
+        <div class="timeline-container">
+          <span class="time-label" id="timeCurrent">0:00</span>
+          <div class="scrubber" id="scrubber">
+            <div class="scrubber-track">
+              <div class="scrubber-fill" id="scrubberFill"></div>
+              <div class="scrubber-head" id="scrubberHead"></div>
+            </div>
+          </div>
+          <span class="time-label" id="timeTotal">0:00</span>
+        </div>
+
+        <!-- Actions: Controls & Liquid Volume Bar -->
+        <div class="actions-row">
+          <div class="controls-container">
+            <button class="ctrl-btn" id="btnPrev" title="Anterior">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
+                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
+            </button>
+
+            <button class="ctrl-btn play-btn" id="btnPlayPause" title="Reproducir / Pausar">
+              <!-- Play Icon -->
+              <svg id="iconPlay" viewBox="0 0 24 24" width="19" height="19" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+              <!-- Pause Icon -->
+              <svg id="iconPause" class="hidden" viewBox="0 0 24 24" width="19" height="19" fill="currentColor">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+              </svg>
+            </button>
+
+            <button class="ctrl-btn" id="btnNext" title="Siguiente">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Interactive Volume Slider -->
+          <div class="volume-slider-group" id="volumeSliderGroup">
+            <button class="vol-btn" id="btnMute" title="Silenciar / Activar sonido">
+              <svg id="iconVolHigh" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <svg id="iconVolMute" class="hidden" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <line x1="23" y1="9" x2="17" y2="15"></line>
+                <line x1="17" y1="9" x2="23" y2="15"></line>
+              </svg>
+            </button>
+            <div class="vol-bar" id="volBar" title="Ajustar volumen">
+              <div class="vol-track">
+                <div class="vol-fill" id="volFill"></div>
+                <div class="vol-head" id="volHead"></div>
+              </div>
+            </div>
+            <span class="vol-label" id="volLabel">50%</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Settings Panel (Slides Down) -->
+    <section class="settings-panel hidden" id="settingsPanel">
+      <div class="settings-header">
+        <span class="settings-title">Personalización</span>
+        <button class="close-settings-btn" id="btnCloseSettings">Listo</button>
+      </div>
+
+      <div class="settings-content">
+        <!-- Hotkey Section -->
+        <div class="setting-group">
+          <label class="setting-label">Atajo de Teclado Global (Bind)</label>
+          <div class="hotkey-picker">
+            <div class="mod-pills">
+              <button class="pill-btn mod-btn" data-mod="Control" id="modCtrl">Ctrl</button>
+              <button class="pill-btn mod-btn" data-mod="Shift" id="modShift">Shift</button>
+              <button class="pill-btn mod-btn" data-mod="Alt" id="modAlt">Alt</button>
+              <button class="pill-btn mod-btn" data-mod="Win" id="modWin">Win</button>
+            </div>
+            <div class="key-selector-row">
+              <span class="plus-sign">+</span>
+              <select class="key-select" id="keySelect">
+                <option value="Space">Espacio (Space)</option>
+                <option value="M">M</option>
+                <option value="P">P</option>
+                <option value="O">O</option>
+                <option value="X">X</option>
+                <option value="Media_Play_Pause">Play/Pause Key</option>
+                <option value="F8">F8</option>
+                <option value="F9">F9</option>
+                <option value="F10">F10</option>
+                <option value="F11">F11</option>
+                <option value="F12">F12</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+                <option value="E">E</option>
+                <option value="K">K</option>
+                <option value="L">L</option>
+                <option value="S">S</option>
+              </select>
+            </div>
+          </div>
+          <div class="current-bind-display">
+            Bind actual: <span class="bind-badge" id="bindBadge">Ctrl + Shift + Espacio</span>
+          </div>
+        </div>
+
+        <!-- Position Presets Section -->
+        <div class="setting-group">
+          <label class="setting-label">Posición en Pantalla</label>
+          <div class="position-grid">
+            <button class="pos-option active" data-pos="top-center" id="posTopCenter">
+              <span class="pos-icon">🏝️</span>
+              <span class="pos-name">Dynamic Island</span>
+            </button>
+            <button class="pos-option" data-pos="bottom-right" id="posBottomRight">
+              <span class="pos-icon">↘️</span>
+              <span class="pos-name">Bandeja Win11</span>
+            </button>
+            <button class="pos-option" data-pos="center" id="posCenter">
+              <span class="pos-icon">🎯</span>
+              <span class="pos-name">Centro HUD</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Toggles Section -->
+        <div class="setting-group toggles-group">
+          <label class="toggle-item">
+            <span class="toggle-text">Permitir arrastrar la ventana</span>
+            <input type="checkbox" id="chkDraggable" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Ocultar al hacer clic fuera (Auto-hide)</span>
+            <input type="checkbox" id="chkAutoHide" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Resplandor ambiental dinámico (Liquid Glow)</span>
+            <input type="checkbox" id="chkAmbientGlow" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Revelar al pasar el ratón (Isla Dinámica)</span>
+            <input type="checkbox" id="chkHoverReveal" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Volumen de la app (mezclador; si no hay sesión usa el del sistema)</span>
+            <input type="checkbox" id="chkAppVolume" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+
+        <!-- Save button -->
+        <div class="settings-actions">
+          <button class="save-btn" id="btnSaveConfig">
+            <span>Guardar Preferencias</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
