@@ -64,15 +64,28 @@ pub struct AudioSourceItem {
 // Global cache: (Track Title, Track Artist, Source App ID, Cached Base64)
 type ThumbnailCache = Mutex<Option<(String, String, String, Option<String>)>>;
 static THUMBNAIL_CACHE: ThumbnailCache = Mutex::new(None);
-// Selected source app ID (if manually selected by user)
-static SELECTED_SOURCE_ID: Mutex<Option<String>> = Mutex::new(None);
+// Manual selection: id (with ##idx tiebreaker) + title at the time of picking
+#[derive(Clone)]
+struct SelectedSource {
+    id: String,
+    title: String,
+}
+static SELECTED_SOURCE: Mutex<Option<SelectedSource>> = Mutex::new(None);
 // Exact AUMID of the session we are currently showing (auto mode).
 // Exact (not app-level) because one browser exposes several sessions with different AUMIDs.
 // Only `stabilize` commits it, so a transient pick can never latch.
 type ShownState = Mutex<Option<(String, MediaState, Option<(String, Instant)>)>>;
 static SHOWN_STATE: ShownState = Mutex::new(None);
+// AUMID -> instant it started playing (penalizes just-appeared ads/previews)
+static PLAYING_SINCE: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+// AUMID -> (title, duration, cached at): scoring must stay cheap on every poll
+type SessionMetaCache = Mutex<Option<HashMap<String, (String, f64, Instant)>>>;
+static SESSION_META: SessionMetaCache = Mutex::new(None);
 
 const SESSION_SWITCH_HOLD: Duration = Duration::from_millis(1500);
+const SESSION_META_TTL: Duration = Duration::from_secs(2);
+const JUST_STARTED: Duration = Duration::from_millis(1500);
+const SHORT_TRACK_SECS: f64 = 8.0;
 
 // The AUMID currently committed for display (used as sticky preference when picking a session)
 fn shown_aumid() -> Option<String> {
@@ -199,72 +212,225 @@ impl MediaController {
             .unwrap_or(false)
     }
 
-    fn get_current_session() -> Option<GlobalSystemMediaTransportControlsSession> {
-        let manager = Self::get_manager()?;
-
-        // If user manually chose a source, try finding that session
-        if let Ok(guard) = SELECTED_SOURCE_ID.lock() {
-            if let Some(target) = guard.as_ref() {
-                match manager.GetSessions() {
-                    Ok(sessions) => {
-                        // ponytail: exact id; ##idx tiebreaker only among same-app dupes; else first playing of that app
-                        let all: Vec<_> = sessions.into_iter().collect();
-                        let mut counts: HashMap<String, usize> = HashMap::new();
-                        for s in &all {
-                            let r = s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
-                            *counts.entry(r).or_insert(0) += 1;
-                        }
-                        for (idx, session) in all.iter().enumerate() {
-                            let raw = session.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
-                            let tid = Self::tie_id(&raw, idx, counts.get(&raw).copied().unwrap_or(0) > 1);
-                            if &tid == target {
-                                return Some(session.clone());
-                            }
-                        }
-                        // Base id (no ## tie): if several same-app sessions, prefer the one actually playing
-                        let base = target.split("##").next().unwrap_or(target);
-                        if counts.get(base).copied().unwrap_or(0) > 1 {
-                            if let Some(s) = all.iter().find(|s| {
-                                s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default() == base
-                                    && Self::session_is_playing(s)
-                            }) {
-                                return Some(s.clone());
-                            }
-                        }
-                        if let Some(s) = all.iter().find(|s| {
-                            s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default() == base
-                        }) {
-                            return Some(s.clone());
-                        }
-                    }
-                    // A broken manager would keep failing forever: recreate it on the next call
-                    Err(_) => Self::invalidate_manager(),
+    fn session_title(session: &GlobalSystemMediaTransportControlsSession) -> String {
+        if let Ok(op) = session.TryGetMediaPropertiesAsync() {
+            if let Ok(props) = op.get() {
+                if !props.as_raw().is_null() {
+                    return props.Title().map(|h| h.to_string()).unwrap_or_default();
                 }
             }
         }
+        String::new()
+    }
 
-        // Auto mode. Keep the exact session we're showing (a browser exposes several sessions
-        // with different AUMIDs, e.g. Brave vs Brave._crx_...); only switch when it's gone.
-        // Transient flashes are absorbed later by `stabilize`'s debounce.
+    // Title + duration for scoring, cached briefly so the 3 Hz poll stays cheap
+    fn session_meta(session: &GlobalSystemMediaTransportControlsSession, aumid: &str) -> (String, f64) {
+        if let Ok(guard) = SESSION_META.lock() {
+            if let Some(map) = guard.as_ref() {
+                if let Some((title, duration, at)) = map.get(aumid) {
+                    if at.elapsed() < SESSION_META_TTL {
+                        return (title.clone(), *duration);
+                    }
+                }
+            }
+        }
+        let title = Self::session_title(session);
+        let mut duration = 0.0;
+        if let Ok(timeline) = session.GetTimelineProperties() {
+            if !timeline.as_raw().is_null() {
+                if let Ok(end) = timeline.EndTime() {
+                    let secs = end.Duration as f64 / 10_000_000.0;
+                    if secs.is_finite() && secs > 0.0 {
+                        duration = secs;
+                    }
+                }
+            }
+        }
+        if let Ok(mut guard) = SESSION_META.lock() {
+            guard
+                .get_or_insert_with(HashMap::new)
+                .insert(aumid.to_string(), (title.clone(), duration, Instant::now()));
+        }
+        (title, duration)
+    }
+
+    fn track_playing(aumid: &str, playing: bool) {
+        if let Ok(mut guard) = PLAYING_SINCE.lock() {
+            let map = guard.get_or_insert_with(HashMap::new);
+            if playing {
+                map.entry(aumid.to_string()).or_insert_with(Instant::now);
+            } else {
+                map.remove(aumid);
+            }
+        }
+    }
+
+    fn playing_for(aumid: &str) -> Duration {
+        PLAYING_SINCE
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().and_then(|m| m.get(aumid).map(|t| t.elapsed())))
+            .unwrap_or(Duration::MAX)
+    }
+
+    // Auto-mode score: playing and sticky first, tiny/new flashes last
+    fn score_session(
+        playing: bool,
+        is_shown: bool,
+        has_title: bool,
+        duration: f64,
+        is_windows_current: bool,
+        playing_for: Duration,
+    ) -> i32 {
+        let mut score = 0i32;
+        if playing {
+            score += 100;
+        }
+        if is_shown {
+            score += 40;
+        }
+        if has_title && duration > 0.0 {
+            score += 20;
+        }
+        if is_windows_current {
+            score += 10;
+        }
+        if playing && playing_for < JUST_STARTED {
+            score -= 50;
+        }
+        if duration > 0.0 && duration < SHORT_TRACK_SECS {
+            score -= 30;
+        }
+        score
+    }
+
+    // Title of the session a manual id points at (stored so duplicates survive reorders)
+    fn title_for_id(target: &str) -> Option<String> {
+        let manager = Self::get_manager()?;
+        let sessions = manager.GetSessions().ok()?;
+        let all: Vec<_> = sessions.into_iter().collect();
+        let aumids: Vec<String> = all
+            .iter()
+            .map(|s| s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default())
+            .collect();
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for aumid in &aumids {
+            if !aumid.is_empty() {
+                *counts.entry(aumid.clone()).or_insert(0) += 1;
+            }
+        }
+        for (idx, aumid) in aumids.iter().enumerate() {
+            let dup = counts.get(aumid).copied().unwrap_or(0) > 1;
+            if Self::tie_id(aumid, idx, dup) == target {
+                return Some(Self::session_title(&all[idx]));
+            }
+        }
+        let base = target.split("##").next().unwrap_or(target);
+        let idx = (0..all.len()).find(|&i| aumids[i] == base)?;
+        Some(Self::session_title(&all[idx]))
+    }
+
+    fn get_current_session() -> Option<GlobalSystemMediaTransportControlsSession> {
+        let manager = Self::get_manager()?;
+
+        // Manual selection: exact id first, then title (duplicates), then playing, then the app
+        let manual = SELECTED_SOURCE.lock().ok().and_then(|g| g.clone());
+        if let Some(sel) = manual {
+            let target = sel.id.as_str();
+            match manager.GetSessions() {
+                Ok(sessions) => {
+                    let all: Vec<_> = sessions.into_iter().collect();
+                    let aumids: Vec<String> = all
+                        .iter()
+                        .map(|s| s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default())
+                        .collect();
+                    let mut counts: HashMap<String, usize> = HashMap::new();
+                    for aumid in &aumids {
+                        if !aumid.is_empty() {
+                            *counts.entry(aumid.clone()).or_insert(0) += 1;
+                        }
+                    }
+                    for (idx, aumid) in aumids.iter().enumerate() {
+                        let dup = counts.get(aumid).copied().unwrap_or(0) > 1;
+                        if Self::tie_id(aumid, idx, dup) == target {
+                            return Some(all[idx].clone());
+                        }
+                    }
+                    // The index suffix depends on GetSessions() order: match the saved title first
+                    let base = target.split("##").next().unwrap_or(target);
+                    let same_app: Vec<usize> = (0..all.len()).filter(|&i| aumids[i] == base).collect();
+                    if same_app.len() > 1 && !sel.title.is_empty() {
+                        if let Some(&idx) = same_app
+                            .iter()
+                            .find(|&&i| Self::session_title(&all[i]) == sel.title)
+                        {
+                            return Some(all[idx].clone());
+                        }
+                    }
+                    if let Some(&idx) = same_app.iter().find(|&&i| Self::session_is_playing(&all[i])) {
+                        return Some(all[idx].clone());
+                    }
+                    if let Some(&idx) = same_app.first() {
+                        return Some(all[idx].clone());
+                    }
+                }
+                // A broken manager would keep failing forever: recreate it on the next call
+                Err(_) => Self::invalidate_manager(),
+            }
+        }
+
+        // Auto mode: score every session and prefer what we are already showing (sticky).
+        // Transient flashes are still absorbed later by `stabilize`'s debounce.
+        let windows_current = manager
+            .GetCurrentSession()
+            .ok()
+            .and_then(|s| s.SourceAppUserModelId().ok())
+            .map(|h| h.to_string())
+            .unwrap_or_default();
+
         match manager.GetSessions() {
             Ok(sessions) => {
                 let all: Vec<_> = sessions.into_iter().collect();
-                let aumid_of = |s: &GlobalSystemMediaTransportControlsSession| {
-                    s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
-                };
+                if all.is_empty() {
+                    return manager.GetCurrentSession().ok();
+                }
+                let aumids: Vec<String> = all
+                    .iter()
+                    .map(|s| s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default())
+                    .collect();
+                let shown = shown_aumid();
+                let mut best: Option<(i32, usize)> = None;
 
-                // 1. Exact session we were showing, if it still exists
-                if let Some(shown) = shown_aumid() {
-                    if let Some(s) = all.iter().find(|s| aumid_of(s) == shown) {
-                        return Some(s.clone());
+                for idx in 0..all.len() {
+                    let aumid = &aumids[idx];
+                    if aumid.is_empty() {
+                        continue;
+                    }
+                    let playing = Self::session_is_playing(&all[idx]);
+                    Self::track_playing(aumid, playing);
+                    let (title, duration) = Self::session_meta(&all[idx], aumid);
+                    let is_shown = shown.as_deref() == Some(aumid.as_str());
+                    let score = Self::score_session(
+                        playing,
+                        is_shown,
+                        !title.is_empty(),
+                        duration,
+                        !windows_current.is_empty() && aumid == &windows_current,
+                        Self::playing_for(aumid),
+                    );
+
+                    match best {
+                        Some((best_score, _)) if score > best_score => best = Some((score, idx)),
+                        Some((best_score, _)) if score == best_score && is_shown => {
+                            best = Some((score, idx))
+                        }
+                        None => best = Some((score, idx)),
+                        _ => {}
                     }
                 }
-                // 2. Otherwise a playing session, else the first available
-                if let Some(s) = all.iter().find(|s| Self::session_is_playing(s)) {
-                    return Some(s.clone());
-                }
-                if let Some(s) = all.first() {
-                    return Some(s.clone());
+
+                if let Some((_, idx)) = best {
+                    return Some(all[idx].clone());
                 }
             }
             Err(_) => Self::invalidate_manager(),
@@ -275,8 +441,12 @@ impl MediaController {
     }
 
     pub fn select_source(source_id: Option<String>) {
-        if let Ok(mut guard) = SELECTED_SOURCE_ID.lock() {
-            *guard = source_id;
+        let stored = source_id.map(|id| {
+            let title = Self::title_for_id(&id).unwrap_or_default();
+            SelectedSource { id, title }
+        });
+        if let Ok(mut guard) = SELECTED_SOURCE.lock() {
+            *guard = stored;
         }
         // Manual choice must show immediately: drop the auto-selection debounce
         if let Ok(mut g) = SHOWN_STATE.lock() {
@@ -299,7 +469,7 @@ impl MediaController {
             None => String::new(),
         };
 
-        let selected_id = SELECTED_SOURCE_ID.lock().ok().and_then(|g| g.clone());
+        let selected_id = Self::selected_source_id();
 
         let mut list = Vec::new();
         if let Ok(sessions) = manager.GetSessions() {
@@ -369,10 +539,17 @@ impl MediaController {
     }
 
     pub fn selected_source_id() -> Option<String> {
-        SELECTED_SOURCE_ID.lock().ok().and_then(|g| g.clone())
+        SELECTED_SOURCE
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|s| s.id.clone()))
     }
 
     pub fn current_source_app_id() -> String {
+        // The poll already committed what we show: reuse it instead of re-enumerating GSMTC
+        if let Some(aumid) = shown_aumid() {
+            return aumid;
+        }
         Self::get_current_session()
             .and_then(|s| s.SourceAppUserModelId().ok())
             .map(|h| h.to_string())
@@ -622,5 +799,54 @@ impl MediaController {
         let op = session.TryChangePlaybackPositionAsync(timespan.Duration).map_err(|e| e.to_string())?;
         let res = op.get().map_err(|e| e.to_string())?;
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn score(
+        playing: bool,
+        shown: bool,
+        titled: bool,
+        duration: f64,
+        windows_current: bool,
+        playing_for: Duration,
+    ) -> i32 {
+        MediaController::score_session(
+            playing,
+            shown,
+            titled,
+            duration,
+            windows_current,
+            playing_for,
+        )
+    }
+
+    #[test]
+    fn playing_current_source_beats_a_fresh_preview() {
+        let spotify = score(true, true, true, 210.0, false, Duration::from_secs(30));
+        let preview = score(true, false, true, 120.0, false, Duration::from_millis(300));
+        assert_eq!(spotify, 160);
+        assert_eq!(preview, 70);
+        assert!(preview < spotify);
+    }
+
+    #[test]
+    fn switches_when_the_shown_source_pauses() {
+        let paused_show = score(false, true, true, 210.0, false, Duration::MAX);
+        let youtube = score(true, false, true, 200.0, false, Duration::from_secs(2));
+        assert_eq!(paused_show, 60);
+        assert_eq!(youtube, 120);
+        assert!(youtube > paused_show);
+    }
+
+    #[test]
+    fn ignores_short_just_started_sounds() {
+        let paused_show = score(false, true, true, 210.0, false, Duration::MAX);
+        let sound = score(true, false, true, 2.0, false, Duration::from_millis(200));
+        assert_eq!(sound, 40);
+        assert!(sound < paused_show);
     }
 }

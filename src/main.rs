@@ -143,7 +143,7 @@ async fn get_audio_sources() -> Vec<media::AudioSourceItem> {
 }
 
 #[tauri::command]
-fn select_audio_source(source_id: Option<String>) -> Result<(), String> {
+async fn select_audio_source(source_id: Option<String>) -> Result<(), String> {
     media::MediaController::select_source(source_id);
     Ok(())
 }
