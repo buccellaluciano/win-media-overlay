@@ -15,7 +15,9 @@ use windows::Win32::NetworkManagement::IpHelper::{
     FreeMibTable, GetIfTable2, MIB_IF_TABLE2, IF_TYPE_SOFTWARE_LOOPBACK,
 };
 use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::{
+    GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
+};
 use windows::Win32::System::Performance::{
     PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
     PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY,
@@ -160,6 +162,13 @@ fn net_totals() -> Option<(u64, u64)> {
             if row.OperStatus != IfOperStatusUp || row.Type == IF_TYPE_SOFTWARE_LOOPBACK {
                 continue;
             }
+            // ponytail: filter/virtual interfaces (WFP, Hyper-V, VPN) repeat the physical
+            // adapter's traffic; count hardware, non-filter interfaces only.
+            // Bitfield per netioapi.h: bit0 HardwareInterface, bit1 FilterInterface.
+            let flags = row.InterfaceAndOperStatusFlags._bitfield;
+            if flags & 0b01 == 0 || flags & 0b10 != 0 {
+                continue;
+            }
             down = down.saturating_add(row.InOctets);
             up = up.saturating_add(row.OutOctets);
         }
@@ -231,7 +240,8 @@ impl Nvml {
     fn load() -> Option<Self> {
         unsafe {
             let name = wide("nvml.dll");
-            let lib = LoadLibraryW(PCWSTR(name.as_ptr())).ok()?;
+            // System32 only: a plain LoadLibraryW would pick up an nvml.dll planted next to the exe
+            let lib = LoadLibraryExW(PCWSTR(name.as_ptr()), None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok()?;
 
             let p_init = GetProcAddress(lib, PCSTR(c"nvmlInit_v2".as_ptr() as *const u8))?;
             let init: FnInit = std::mem::transmute(p_init);

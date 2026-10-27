@@ -913,7 +913,11 @@ fn main() {
                                     }
                                     IslandMode::Expanded => {
                                         hover_since = None;
-                                        if !pinned {
+                                        // Opened by hotkey/tray (focused): stay until focus leaves,
+                                        // not 450 ms later because the cursor is elsewhere
+                                        if pinned || win.is_focused().unwrap_or(false) {
+                                            outside_since = None;
+                                        } else {
                                             let mut cursor = POINT::default();
                                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
                                                 if cursor_inside_window(&win, cursor, 14) {

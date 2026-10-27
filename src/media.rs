@@ -401,14 +401,31 @@ impl MediaController {
                 let shown = shown_aumid();
                 let mut best: Option<(i32, usize)> = None;
 
+                // ponytail: browser tabs share one AUMID. Track "playing since" per app (any tab
+                // playing) and cache meta per tab, or a paused tab resets a playing tab every poll.
+                let playing: Vec<bool> = all.iter().map(Self::session_is_playing).collect();
+                let mut counts: HashMap<&str, usize> = HashMap::new();
+                let mut app_playing: HashMap<&str, bool> = HashMap::new();
+                for (idx, aumid) in aumids.iter().enumerate() {
+                    if aumid.is_empty() {
+                        continue;
+                    }
+                    *counts.entry(aumid.as_str()).or_insert(0) += 1;
+                    *app_playing.entry(aumid.as_str()).or_insert(false) |= playing[idx];
+                }
+                for (aumid, any_playing) in &app_playing {
+                    Self::track_playing(aumid, *any_playing);
+                }
+
                 for idx in 0..all.len() {
                     let aumid = &aumids[idx];
                     if aumid.is_empty() {
                         continue;
                     }
-                    let playing = Self::session_is_playing(&all[idx]);
-                    Self::track_playing(aumid, playing);
-                    let (title, duration) = Self::session_meta(&all[idx], aumid);
+                    let playing = playing[idx];
+                    let dup = counts.get(aumid.as_str()).copied().unwrap_or(0) > 1;
+                    let meta_key = Self::tie_id(aumid, idx, dup);
+                    let (title, duration) = Self::session_meta(&all[idx], &meta_key);
                     let is_shown = shown.as_deref() == Some(aumid.as_str());
                     let score = Self::score_session(
                         playing,
