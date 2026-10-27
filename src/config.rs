@@ -41,7 +41,19 @@ pub struct AppConfig {
     pub island_click_through_compact: bool, // compact mode ignores the mouse unless hovered
     #[serde(default = "d_expand")]
     pub hover_expand_delay_ms: u32, // hover time before compact expands, 0..=1500
+    #[serde(default)]
+    pub stats_enabled: bool, // opt-in system stats sampler
+    #[serde(default = "d_stats_ms")]
+    pub stats_interval_ms: u32,
+    #[serde(default = "d_stats_items")]
+    pub stats_items: Vec<String>,
+    #[serde(default)]
+    pub stats_in_island: bool,
+    #[serde(default)]
+    pub stats_alerts: bool,
 }
+
+pub const STAT_ITEMS: [&str; 7] = ["cpu", "gpu", "ram", "vram", "net", "disk", "gpu_temp"];
 
 fn d_mods() -> Vec<String> { vec!["Control".to_string(), "Shift".to_string()] }
 fn d_key() -> String { "Space".to_string() }
@@ -50,6 +62,10 @@ fn d_custom() -> i32 { 100 }
 fn d_true() -> bool { true }
 fn d_step() -> f64 { 0.05 }
 fn d_expand() -> u32 { 250 }
+fn d_stats_ms() -> u32 { 1000 }
+fn d_stats_items() -> Vec<String> {
+    STAT_ITEMS.iter().map(|s| s.to_string()).collect()
+}
 
 impl AppConfig {
     // Clamp values from old or hand-edited configs so nothing downstream gets garbage
@@ -59,6 +75,14 @@ impl AppConfig {
         }
         self.volume_step = self.volume_step.clamp(0.01, 0.2);
         self.hover_expand_delay_ms = self.hover_expand_delay_ms.min(1500);
+        self.stats_interval_ms = self.stats_interval_ms.clamp(500, 5000);
+        let mut items = Vec::new();
+        for item in &self.stats_items {
+            if STAT_ITEMS.contains(&item.as_str()) && !items.contains(item) {
+                items.push(item.clone());
+            }
+        }
+        self.stats_items = items;
     }
 }
 
@@ -83,6 +107,11 @@ impl Default for AppConfig {
             island_activities: true,
             island_click_through_compact: false,
             hover_expand_delay_ms: 250,
+            stats_enabled: false,
+            stats_interval_ms: 1000,
+            stats_items: d_stats_items(),
+            stats_in_island: false,
+            stats_alerts: false,
         }
     }
 }

@@ -17,6 +17,9 @@
   --font-apple: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display", "Segoe UI", Roboto, sans-serif;
   --radius-card: 26px;
   --radius-art: 16px;
+  --stat-ok: #30D158;
+  --stat-warn: #FFD60A;
+  --stat-bad: #FF453A;
   --transition-smooth: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -944,6 +947,79 @@ select,
   color: var(--text-tertiary);
   min-width: 27px;
   text-align: right;
+}
+
+/* =========================================================
+   System stats chips
+   ========================================================= */
+
+.stats-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.stats-strip.hidden {
+  display: none;
+}
+
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.stat-chip b {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-fill {
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.stat-fill i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: var(--stat-color, var(--stat-ok));
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.metric-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.metric-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.metric-item input {
+  accent-color: var(--accent-color);
+  cursor: pointer;
 }
 
 .hidden {

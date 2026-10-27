@@ -68,6 +68,18 @@ const chkIslandAlwaysVisible = document.getElementById("chkIslandAlwaysVisible")
 const chkIslandActivities = document.getElementById("chkIslandActivities");
 const chkIslandClickThrough = document.getElementById("chkIslandClickThrough");
 const expandDelaySelect = document.getElementById("expandDelaySelect");
+const statsStrip = document.getElementById("statsStrip");
+const chkStatsEnabled = document.getElementById("chkStatsEnabled");
+const statsIntervalSelect = document.getElementById("statsIntervalSelect");
+const chkStatCpu = document.getElementById("chkStatCpu");
+const chkStatGpu = document.getElementById("chkStatGpu");
+const chkStatRam = document.getElementById("chkStatRam");
+const chkStatVram = document.getElementById("chkStatVram");
+const chkStatNet = document.getElementById("chkStatNet");
+const chkStatDisk = document.getElementById("chkStatDisk");
+const chkStatGpuTemp = document.getElementById("chkStatGpuTemp");
+const chkStatsInIsland = document.getElementById("chkStatsInIsland");
+const chkStatsAlerts = document.getElementById("chkStatsAlerts");
 
 // Dynamic Island elements
 const expandedView = document.getElementById("expandedView");
@@ -100,6 +112,12 @@ let islandMode = ""; // compact | activity | expanded | hidden, owned by the bac
 let lastMediaState = null;
 let lastIslandTrackKey = "";
 let lastIslandSource = "";
+let lastStats = null;
+let statNodes = {};
+let statsBuiltKey = "";
+let islandStatsAlt = false;
+const statsAlertSince = { cpu: null, gpu: null, ram: null };
+const statsLastAlert = { cpu: 0, gpu: 0, ram: 0 };
 let isSourcePopoverOpen = false;
 let selectedSourceId = null;
 let currentMasterVolume = 0.5;
@@ -315,14 +333,11 @@ function updateLyricsChevron() {
   iconLyricsChevron.style.transform = expanded ? "rotate(0deg)" : "rotate(180deg)";
 }
 
-// Measure the card and fit the window (same approach as settings; no magic heights)
-function updateLyricsPanelHeight() {
+// Fit the native window to the real content height (base player + lyrics + stats chips)
+function updateExpandedHeight() {
   if (isSettingsOpen || isSourcePopoverOpen) return; // those own the window size
-  if (!lyricsShouldShow()) {
-    setWindowSize(480, 188);
-    return;
-  }
-  const needed = Math.ceil(liquidCard.getBoundingClientRect().height) + 18;
+  if (islandMode && islandMode !== "expanded") return;
+  const needed = Math.ceil(liquidCard.scrollHeight) + 12;
   setWindowSize(480, Math.max(188, needed));
 }
 
@@ -335,7 +350,7 @@ function setLyricsAvailable(available) {
   }
   updateLyricsChevron();
   applyLyricsPanelDom();
-  updateLyricsPanelHeight();
+  updateExpandedHeight();
 }
 
 function syncLyricsToPosition() {
@@ -365,7 +380,7 @@ btnLyricsToggle.addEventListener("click", (e) => {
   lyricsCollapsed = !lyricsCollapsed;
   updateLyricsChevron();
   applyLyricsPanelDom();
-  updateLyricsPanelHeight();
+  updateExpandedHeight();
 });
 
 function updateLyricsForState(state) {
@@ -492,10 +507,22 @@ function setIslandArt(src) {
 
 function updateIslandCompact(state) {
   const has = !!(state && state.has_session);
-  const title = has ? state.title || "Sin reproducción" : "Sin reproducción";
+  const showStats =
+    islandStatsAlt &&
+    islandMode === "compact" &&
+    !!appConfig &&
+    !!appConfig.stats_in_island &&
+    !!lastStats;
+
+  let title = has ? state.title || "Sin reproducción" : "Sin reproducción";
+  if (showStats) {
+    const summary = statsSummary(lastStats);
+    if (summary) title = summary;
+    islandTitle.classList.remove("scrollable");
+  }
   if (islandTitle.textContent !== title) {
     islandTitle.textContent = title;
-    requestAnimationFrame(() => checkMarquee(islandTitle, islandTitleBox));
+    if (!showStats) requestAnimationFrame(() => checkMarquee(islandTitle, islandTitleBox));
   }
   islandEq.classList.toggle("playing", !!(state && state.is_playing));
   setIslandArt(has ? state.thumbnail_base64 || lastThumbnailBase64 : null);
@@ -637,13 +664,14 @@ function applyIslandMode(mode, width, height) {
   if (mode === "expanded") {
     clearActivities();
     applyLyricsPanelDom();
-    updateLyricsPanelHeight();
+    updateExpandedHeight();
   } else if (mode === "hidden") {
     clearActivities();
   } else if (mode === "compact") {
     clearActivities();
     if (lastMediaState) updateIslandCompact(lastMediaState);
   }
+  if (mode !== "compact") islandStatsAlt = false;
 
   morphCard(prevMode, mode, collapseFrom);
 }
@@ -652,6 +680,224 @@ function applyIslandMode(mode, width, height) {
 function updateIslandPin() {
   const pinned = !!(isSettingsOpen || isSourcePopoverOpen);
   invoke("set_island_pinned", { pinned }).catch(() => {});
+}
+
+// =========================================================
+// System stats (Fase 3)
+// =========================================================
+
+const STAT_META = {
+  cpu: { label: "CPU" },
+  gpu: { label: "GPU" },
+  ram: { label: "RAM" },
+  vram: { label: "VRAM" },
+  net: { label: "" },
+  disk: { label: "Disco" },
+  gpu_temp: { label: "GPU" },
+};
+
+function statAvailable(stats, key) {
+  switch (key) {
+    case "gpu":
+      return stats.gpu_pct != null;
+    case "vram":
+      return stats.vram_used_mb != null;
+    case "net":
+      return stats.net_down_kbps != null;
+    case "disk":
+      return stats.disk_pct != null;
+    case "gpu_temp":
+      return stats.gpu_temp_c != null;
+    default:
+      return true;
+  }
+}
+
+function statColor(pct) {
+  if (pct >= 85) return "var(--stat-bad)";
+  if (pct >= 60) return "var(--stat-warn)";
+  return "var(--stat-ok)";
+}
+
+function fmtGB(mb) {
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+function fmtRate(kbps) {
+  if (!Number.isFinite(kbps)) return "0 KB/s";
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
+  if (kbps >= 10) return `${Math.round(kbps)} KB/s`;
+  return `${kbps.toFixed(1)} KB/s`;
+}
+
+function statsSummary(stats) {
+  const parts = [];
+  if (stats && Number.isFinite(stats.cpu_pct)) parts.push(`CPU ${Math.round(stats.cpu_pct)}%`);
+  if (stats && stats.gpu_pct != null) parts.push(`GPU ${Math.round(stats.gpu_pct)}%`);
+  if (parts.length < 2 && stats && Number.isFinite(stats.ram_pct)) {
+    parts.push(`RAM ${Math.round(stats.ram_pct)}%`);
+  }
+  return parts.join(" · ");
+}
+
+function buildStatsChips(keys) {
+  statsStrip.innerHTML = ""; // only labels from STAT_META, never remote text
+  statNodes = {};
+  const frag = document.createDocumentFragment();
+  for (const key of keys) {
+    const meta = STAT_META[key];
+    if (!meta) continue;
+    const chip = document.createElement("span");
+    chip.className = "stat-chip";
+    if (meta.label) {
+      const label = document.createElement("span");
+      label.textContent = meta.label;
+      chip.appendChild(label);
+    }
+    const value = document.createElement("b");
+    value.textContent = "—";
+    chip.appendChild(value);
+    let bar = null;
+    if (
+      key === "cpu" ||
+      key === "gpu" ||
+      key === "ram" ||
+      key === "vram" ||
+      key === "disk" ||
+      key === "gpu_temp"
+    ) {
+      const fill = document.createElement("span");
+      fill.className = "stat-fill";
+      bar = document.createElement("i");
+      fill.appendChild(bar);
+      chip.appendChild(fill);
+    }
+    frag.appendChild(chip);
+    statNodes[key] = { chip, value, bar, color: "" };
+  }
+  statsStrip.appendChild(frag);
+}
+
+function setStatColor(node, color) {
+  if (node.color !== color) {
+    node.chip.style.setProperty("--stat-color", color);
+    node.color = color;
+  }
+}
+
+function updateStatChip(key, stats) {
+  const node = statNodes[key];
+  if (!node) return;
+  let text = "";
+  let pct = null;
+  let color = "";
+
+  switch (key) {
+    case "cpu":
+      pct = stats.cpu_pct;
+      text = `${Math.round(pct)}%`;
+      break;
+    case "gpu":
+      pct = stats.gpu_pct || 0;
+      text = `${Math.round(pct)}%`;
+      break;
+    case "ram":
+      pct = stats.ram_pct;
+      text = `${fmtGB(stats.ram_used_mb)}/${Math.round(stats.ram_total_mb / 1024)} GB`;
+      break;
+    case "vram": {
+      const total = stats.vram_total_mb;
+      text = total
+        ? `${fmtGB(stats.vram_used_mb)}/${Math.round(total / 1024)} GB`
+        : fmtGB(stats.vram_used_mb);
+      pct = total ? (stats.vram_used_mb / total) * 100 : null;
+      break;
+    }
+    case "net":
+      text = `▼ ${fmtRate(stats.net_down_kbps)}  ▲ ${fmtRate(stats.net_up_kbps)}`;
+      break;
+    case "disk":
+      pct = stats.disk_pct;
+      text = `${Math.round(pct)}%`;
+      break;
+    case "gpu_temp": {
+      const t = stats.gpu_temp_c;
+      text = `${Math.round(t)}°C`;
+      pct = Math.min(100, Math.max(0, t));
+      color = t >= 85 ? "var(--stat-bad)" : t >= 70 ? "var(--stat-warn)" : "var(--stat-ok)";
+      break;
+    }
+    default:
+      return;
+  }
+
+  if (node.value.textContent !== text) node.value.textContent = text;
+  if (node.bar && pct !== null && Number.isFinite(pct)) {
+    const width = `${Math.min(100, Math.max(0, pct)).toFixed(0)}%`;
+    if (node.bar.style.width !== width) node.bar.style.width = width;
+    if (!color) color = statColor(pct);
+  }
+  if (color) setStatColor(node, color);
+}
+
+function renderStats(stats) {
+  if (!stats) return;
+  lastStats = stats;
+  const cfg = appConfig;
+  if (!cfg || !cfg.stats_enabled) return;
+
+  const items = Array.isArray(cfg.stats_items) ? cfg.stats_items : [];
+  const keys = items.filter((key) => STAT_META[key] && statAvailable(stats, key));
+  const buildKey = keys.join(",");
+  if (buildKey !== statsBuiltKey) {
+    buildStatsChips(keys);
+    statsBuiltKey = buildKey;
+    statsStrip.classList.toggle("hidden", keys.length === 0);
+    updateExpandedHeight();
+  }
+  keys.forEach((key) => updateStatChip(key, stats));
+  checkStatsAlerts(stats);
+}
+
+function resetStatsUI() {
+  lastStats = null;
+  statsBuiltKey = "";
+  statNodes = {};
+  statsStrip.innerHTML = "";
+  statsStrip.classList.add("hidden");
+  updateExpandedHeight();
+}
+
+function checkStatsAlerts(stats) {
+  const cfg = appConfig;
+  if (!cfg || !cfg.stats_enabled || !cfg.stats_alerts) return;
+  const now = performance.now();
+  const watch = [
+    ["cpu", Number.isFinite(stats.cpu_pct) && stats.cpu_pct > 95, stats.cpu_pct],
+    ["gpu", stats.gpu_pct != null && stats.gpu_pct > 95, stats.gpu_pct],
+    ["ram", Number.isFinite(stats.ram_pct) && stats.ram_pct > 90, stats.ram_pct],
+  ];
+  for (const [key, over, value] of watch) {
+    if (!over) {
+      statsAlertSince[key] = null;
+      continue;
+    }
+    if (statsAlertSince[key] === null) statsAlertSince[key] = now;
+    if (now - statsAlertSince[key] >= 10000 && now - statsLastAlert[key] >= 300000) {
+      statsAlertSince[key] = null;
+      statsLastAlert[key] = now;
+      enqueueActivity({
+        key: `alert:${key}`,
+        label: "Recursos",
+        text: `${key.toUpperCase()} al ${Math.round(value)} %`,
+        art: lastThumbnailBase64,
+      });
+    }
+  }
+}
+
+function applyStatsConfig() {
+  if (!appConfig || !appConfig.stats_enabled) resetStatsUI();
 }
 
 // Update UI with incoming MediaState
@@ -1072,7 +1318,7 @@ async function toggleSourcePopover(open) {
     sourcePopover.classList.add("hidden");
     if (!isSettingsOpen) {
       applyLyricsPanelDom();
-      updateLyricsPanelHeight();
+      updateExpandedHeight();
     }
   }
 }
@@ -1252,7 +1498,7 @@ async function toggleSettings(open) {
       btnSettings.style.transform = "rotate(0deg)";
       btnSettings.style.color = "";
       applyLyricsPanelDom();
-      updateLyricsPanelHeight();
+      updateExpandedHeight();
     }
   } finally {
     settingsBusy = false;
@@ -1372,6 +1618,22 @@ async function loadConfigUI() {
     const delay = String(Number(appConfig.hover_expand_delay_ms));
     const delays = ["0", "150", "250", "500", "1000"];
     expandDelaySelect.value = delays.includes(delay) ? delay : "250";
+
+    chkStatsEnabled.checked = !!appConfig.stats_enabled;
+    const statInt = String(Number(appConfig.stats_interval_ms));
+    statsIntervalSelect.value = ["500", "1000", "2000", "5000"].includes(statInt)
+      ? statInt
+      : "1000";
+    const statItems = Array.isArray(appConfig.stats_items) ? appConfig.stats_items : [];
+    chkStatCpu.checked = statItems.includes("cpu");
+    chkStatGpu.checked = statItems.includes("gpu");
+    chkStatRam.checked = statItems.includes("ram");
+    chkStatVram.checked = statItems.includes("vram");
+    chkStatNet.checked = statItems.includes("net");
+    chkStatDisk.checked = statItems.includes("disk");
+    chkStatGpuTemp.checked = statItems.includes("gpu_temp");
+    chkStatsInIsland.checked = !!appConfig.stats_in_island;
+    chkStatsAlerts.checked = !!appConfig.stats_alerts;
     updateHoverRevealIcon();
 
     if (!chkAmbientGlow.checked) {
@@ -1404,6 +1666,19 @@ btnSaveConfig.addEventListener("click", async () => {
     island_activities: chkIslandActivities.checked,
     island_click_through_compact: chkIslandClickThrough.checked,
     hover_expand_delay_ms: Number(expandDelaySelect.value) || 0,
+    stats_enabled: chkStatsEnabled.checked,
+    stats_interval_ms: Number(statsIntervalSelect.value) || 1000,
+    stats_items: [
+      chkStatCpu.checked ? "cpu" : null,
+      chkStatGpu.checked ? "gpu" : null,
+      chkStatRam.checked ? "ram" : null,
+      chkStatVram.checked ? "vram" : null,
+      chkStatNet.checked ? "net" : null,
+      chkStatDisk.checked ? "disk" : null,
+      chkStatGpuTemp.checked ? "gpu_temp" : null,
+    ].filter(Boolean),
+    stats_in_island: chkStatsInIsland.checked,
+    stats_alerts: chkStatsAlerts.checked,
   };
 
   try {
@@ -1424,6 +1699,11 @@ btnSaveConfig.addEventListener("click", async () => {
     lyricsTrackKey = "";
     lyricsRequestKey = "";
     void refreshMediaState();
+
+    // Stats visibility/targets may have changed
+    applyStatsConfig();
+    if (!chkStatsInIsland.checked) islandStatsAlt = false;
+    if (lastMediaState) updateIslandCompact(lastMediaState);
 
     // Button feedback
     const originalText = btnSaveConfig.innerHTML;
@@ -1580,6 +1860,20 @@ async function init() {
     applyIslandMode(payload.mode, payload.width, payload.height);
   });
 
+  // System stats from the backend sampler
+  await listen("system-stats", (event) => {
+    renderStats(event.payload);
+  });
+
+  // Compact island: alternate between the title and a stats summary every 4 s
+  setInterval(() => {
+    if (islandMode !== "compact" || !appConfig || !appConfig.stats_in_island || !lastStats) {
+      return;
+    }
+    islandStatsAlt = !islandStatsAlt;
+    if (lastMediaState) updateIslandCompact(lastMediaState);
+  }, 4000);
+
   // Safety: never leave the card faded out when the window is focused/shown (hotkey, click)
   try {
     const appWindow = window.__TAURI__.window.getCurrentWindow();
@@ -1592,6 +1886,9 @@ async function init() {
 
   // Safety: if the pointer enters the window, it must be interactive (covers focus-steal cases)
   document.documentElement.addEventListener("mouseenter", () => liquidCard.classList.remove("island-out"));
+
+  // Stats chips/visibility follow the saved config from the first frame
+  applyStatsConfig();
 }
 
 window.addEventListener("DOMContentLoaded", init);

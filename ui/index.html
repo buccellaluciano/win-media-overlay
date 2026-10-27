@@ -177,6 +177,9 @@
             <span class="vol-label" id="volLabel">50%</span>
           </div>
         </div>
+
+        <!-- System stats strip (Fase 3) -->
+        <div class="stats-strip hidden" id="statsStrip"></div>
       </div>
     </main>
 
@@ -285,6 +288,49 @@
               <option value="1000">1000 ms</option>
             </select>
           </div>
+        </div>
+
+        <!-- System stats settings -->
+        <div class="setting-group">
+          <label class="setting-label">Estadísticas del sistema</label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Mostrar estadísticas (CPU, RAM, GPU, red...)</span>
+            <input type="checkbox" id="chkStatsEnabled" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="key-selector-row">
+            <span class="plus-sign">Intervalo</span>
+            <select class="key-select" id="statsIntervalSelect">
+              <option value="500">0,5 s</option>
+              <option value="1000">1 s</option>
+              <option value="2000">2 s</option>
+              <option value="5000">5 s</option>
+            </select>
+          </div>
+
+          <div class="metric-grid">
+            <label class="metric-item"><input type="checkbox" id="chkStatCpu" checked> CPU</label>
+            <label class="metric-item"><input type="checkbox" id="chkStatGpu" checked> GPU</label>
+            <label class="metric-item"><input type="checkbox" id="chkStatRam" checked> RAM</label>
+            <label class="metric-item"><input type="checkbox" id="chkStatVram" checked> VRAM</label>
+            <label class="metric-item"><input type="checkbox" id="chkStatNet" checked> Red</label>
+            <label class="metric-item"><input type="checkbox" id="chkStatDisk" checked> Disco</label>
+            <label class="metric-item"><input type="checkbox" id="chkStatGpuTemp" checked> Temp GPU</label>
+          </div>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Resumen en la isla compacta</span>
+            <input type="checkbox" id="chkStatsInIsland" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Alertas de recursos (CPU/GPU/RAM)</span>
+            <input type="checkbox" id="chkStatsAlerts" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
         </div>
 
         <!-- Toggles Section -->

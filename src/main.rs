@@ -7,6 +7,7 @@ mod fullscreen;
 mod hotkey;
 mod media;
 mod position;
+mod sysstats;
 mod volume;
 
 use config::{load_config, save_config, AppConfig};
@@ -291,6 +292,7 @@ fn update_app_config(
     let _ = window.set_always_on_top(!fullscreen);
 
     *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config.clone();
+    sysstats::wake();
 
     // Switching the island on/off takes effect now, not on the next hover tick
     if new_config.island_enabled != island_was_enabled {
@@ -319,7 +321,9 @@ fn set_window_size(width: f64, height: f64, window: WebviewWindow) -> Result<(),
 
 #[tauri::command]
 fn hide_window(window: WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())
+    let res = window.hide().map_err(|e| e.to_string());
+    sysstats::wake();
+    res
 }
 
 #[tauri::command]
@@ -389,6 +393,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         // Ensure the card isn't left in the island "out" state after being shown again
         let _ = app.emit("island-visibility", true);
     }
+    sysstats::wake();
 }
 
 fn logs_dir() -> PathBuf {
@@ -485,6 +490,7 @@ fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: 
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
+    sysstats::wake();
 
     if mode == IslandMode::Hidden {
         if prev != IslandMode::Hidden {
@@ -723,6 +729,9 @@ fn main() {
                 }
                 app.manage(tray.build(app)?);
             }
+
+            // System stats sampler (sleeps while disabled or hidden)
+            sysstats::spawn(app.handle().clone());
 
             // Background media polling loop
             let app_handle_polling = app.handle().clone();
@@ -964,6 +973,7 @@ fn main() {
                                             );
                                             let _ = win.show();
                                             let _ = app_handle_hover.emit("island-visibility", true);
+                                            sysstats::wake();
                                             outside_since = None;
                                             pending_hide = None;
                                         }
@@ -973,6 +983,7 @@ fn main() {
                                     if t.elapsed() > Duration::from_millis(240) {
                                         let _ = win.hide();
                                         pending_hide = None;
+                                        sysstats::wake();
                                     }
                                     // Re-enter (window box or the top edge) cancels the hide
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
@@ -1043,6 +1054,7 @@ fn main() {
                         // Island mode collapses on hover-out instead of hiding on blur
                         if auto_hide && !island_enabled && last_shown_time.elapsed() > Duration::from_millis(350) {
                             let _ = win_for_event.hide();
+                            sysstats::wake();
                         }
                     }
                 }
