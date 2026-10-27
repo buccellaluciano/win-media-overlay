@@ -81,6 +81,13 @@ const chkStatGpuTemp = document.getElementById("chkStatGpuTemp");
 const chkStatsInIsland = document.getElementById("chkStatsInIsland");
 const chkStatsAlerts = document.getElementById("chkStatsAlerts");
 
+// Appearance elements
+const themeGrid = document.getElementById("themeGrid");
+const themeSwatches = document.querySelectorAll(".theme-swatch");
+const chkAccentFromArt = document.getElementById("chkAccentFromArt");
+const cardOpacityRange = document.getElementById("cardOpacityRange");
+const cardOpacityValue = document.getElementById("cardOpacityValue");
+
 // Dynamic Island elements
 const expandedView = document.getElementById("expandedView");
 const islandCompact = document.getElementById("islandCompact");
@@ -118,6 +125,10 @@ let statsBuiltKey = "";
 let islandStatsAlt = false;
 const statsAlertSince = { cpu: null, gpu: null, ram: null };
 const statsLastAlert = { cpu: 0, gpu: 0, ram: 0 };
+let themeChoice = "liquid";
+let themePreview = "liquid";
+let resolvedTheme = "liquid";
+let opacityPreview = 0.74;
 let isSourcePopoverOpen = false;
 let selectedSourceId = null;
 let currentMasterVolume = 0.5;
@@ -155,7 +166,7 @@ function setAmbientGlow(src) {
   const back = glowFront === ambientGlowA ? ambientGlowB : ambientGlowA;
   if (src) {
     back.style.backgroundImage = `url(${src})`;
-    back.style.opacity = "0.55";
+    back.style.opacity = "var(--glow-strength)";
     glowFront.style.opacity = "0";
     glowFront = back;
   } else {
@@ -172,6 +183,9 @@ function disableAmbientGlow() {
 // Derive a vivid accent color from the album art and apply it app-wide.
 // ponytail: 24x24 canvas + saturation-weighted average; a real palette extractor (MMCQ) if colors look muddy
 function applyAccentFromArt(src) {
+  if (!appConfig || appConfig.accent_from_art === false || THEME_FIXED_ACCENT[resolvedTheme]) {
+    return;
+  }
   const img = new Image();
   img.onload = () => {
     try {
@@ -226,6 +240,75 @@ function resetAccent() {
   const root = document.documentElement.style;
   root.removeProperty("--accent-rgb");
   root.removeProperty("--accent-dark");
+}
+
+// =========================================================
+// Themes (Fase 4)
+// =========================================================
+
+const THEME_IDS = [
+  "liquid",
+  "frost",
+  "oled",
+  "mica",
+  "neon",
+  "sunset",
+  "minimal",
+  "contrast",
+  "auto",
+];
+
+// Themes whose accent is part of the design and must ignore the album art
+const THEME_FIXED_ACCENT = {
+  frost: true,
+  mica: true,
+  sunset: true,
+  minimal: true,
+  contrast: true,
+};
+
+function resolveTheme(id) {
+  if (id === "auto") {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+      ? "frost"
+      : "liquid";
+  }
+  return THEME_IDS.includes(id) ? id : "liquid";
+}
+
+function refreshAccent() {
+  const useArt =
+    !!(appConfig && appConfig.accent_from_art !== false) && !THEME_FIXED_ACCENT[resolvedTheme];
+  if (useArt && lastThumbnailBase64) {
+    applyAccentFromArt(lastThumbnailBase64);
+  } else {
+    resetAccent();
+  }
+}
+
+function updateThemeSwatches(id) {
+  themeSwatches.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.theme === id);
+  });
+}
+
+function applyTheme(id) {
+  const choice = THEME_IDS.includes(id) ? id : "liquid";
+  resolvedTheme = resolveTheme(choice);
+  document.documentElement.dataset.theme = resolvedTheme;
+  document.documentElement.dataset.themeChoice = choice;
+  updateThemeSwatches(choice);
+  refreshAccent();
+}
+
+function applyOpacity(value) {
+  const v = Math.max(0.4, Math.min(1, Number(value) || 0.74));
+  opacityPreview = v;
+  document.documentElement.style.setProperty("--card-opacity-user", String(v));
+  if (cardOpacityValue) cardOpacityValue.textContent = `${Math.round(v * 100)} %`;
+  if (cardOpacityRange && Math.abs(Number(cardOpacityRange.value) - v) > 0.001) {
+    cardOpacityRange.value = String(v);
+  }
 }
 
 function trackKeyOf(state) {
@@ -1493,6 +1576,17 @@ async function toggleSettings(open) {
       }
       await setWindowSize(480, height);
     } else {
+      // Discard unsaved theme/opacity previews
+      if (themePreview !== themeChoice) {
+        themePreview = themeChoice;
+        applyTheme(themeChoice);
+      }
+      if (
+        appConfig &&
+        Math.abs(Number(appConfig.card_opacity ?? 0.74) - opacityPreview) > 0.001
+      ) {
+        applyOpacity(appConfig.card_opacity ?? 0.74);
+      }
       settingsPanel.classList.add("hidden");
       settingsPanel.style.maxHeight = "";
       btnSettings.style.transform = "rotate(0deg)";
@@ -1553,6 +1647,27 @@ modBtns.forEach((btn) => {
 
 keySelect.addEventListener("change", updateBindBadge);
 
+// Theme selector: immediate preview, persisted on Save
+themeSwatches.forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    themePreview = btn.dataset.theme;
+    applyTheme(themePreview);
+  });
+});
+
+cardOpacityRange.addEventListener("input", () => applyOpacity(cardOpacityRange.value));
+
+// Auto theme follows the system scheme live
+if (window.matchMedia) {
+  const lightMq = window.matchMedia("(prefers-color-scheme: light)");
+  if (lightMq.addEventListener) {
+    lightMq.addEventListener("change", () => {
+      if (themePreview === "auto") applyTheme("auto");
+    });
+  }
+}
+
 // Enable/disable dragging: the custom JS drag (start_drag) is the only mechanism
 function applyDraggable(enabled) {
   liquidCard.classList.toggle("no-drag", !enabled);
@@ -1580,6 +1695,13 @@ btnHoverReveal.addEventListener("click", async (e) => {
 async function loadConfigUI() {
   try {
     appConfig = await invoke("get_app_config");
+
+    // Theme and opacity (preview state starts in sync with the saved config)
+    themeChoice = THEME_IDS.includes(appConfig.theme) ? appConfig.theme : "liquid";
+    themePreview = themeChoice;
+    applyTheme(themeChoice);
+    chkAccentFromArt.checked = appConfig.accent_from_art !== false;
+    applyOpacity(appConfig.card_opacity ?? 0.74);
 
     // Modifiers
     modBtns.forEach((btn) => {
@@ -1679,6 +1801,9 @@ btnSaveConfig.addEventListener("click", async () => {
     ].filter(Boolean),
     stats_in_island: chkStatsInIsland.checked,
     stats_alerts: chkStatsAlerts.checked,
+    theme: themePreview,
+    accent_from_art: chkAccentFromArt.checked,
+    card_opacity: Number(cardOpacityRange.value) || 0.74,
   };
 
   try {
@@ -1686,6 +1811,10 @@ btnSaveConfig.addEventListener("click", async () => {
     appConfig = newConfig;
     configDirty = false;
     clearBindError();
+    themeChoice = newConfig.theme;
+    themePreview = themeChoice;
+    applyTheme(themeChoice);
+    applyOpacity(newConfig.card_opacity);
     applyDraggable(chkDraggable.checked);
     // Ambient glow toggle takes effect immediately
     if (chkAmbientGlow.checked) {
@@ -1708,11 +1837,11 @@ btnSaveConfig.addEventListener("click", async () => {
     // Button feedback
     const originalText = btnSaveConfig.innerHTML;
     btnSaveConfig.innerHTML = "<span>✓ Guardado con éxito</span>";
-    btnSaveConfig.style.background = "#30D158";
+    btnSaveConfig.classList.add("saved");
 
     setTimeout(() => {
       btnSaveConfig.innerHTML = originalText;
-      btnSaveConfig.style.background = "";
+      btnSaveConfig.classList.remove("saved");
       toggleSettings(false);
     }, 900);
   } catch (err) {

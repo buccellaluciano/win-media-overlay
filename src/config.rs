@@ -51,9 +51,26 @@ pub struct AppConfig {
     pub stats_in_island: bool,
     #[serde(default)]
     pub stats_alerts: bool,
+    #[serde(default = "d_theme")]
+    pub theme: String,
+    #[serde(default = "d_true")]
+    pub accent_from_art: bool,
+    #[serde(default = "d_opacity")]
+    pub card_opacity: f32,
 }
 
 pub const STAT_ITEMS: [&str; 7] = ["cpu", "gpu", "ram", "vram", "net", "disk", "gpu_temp"];
+pub const THEMES: [&str; 9] = [
+    "liquid",
+    "frost",
+    "oled",
+    "mica",
+    "neon",
+    "sunset",
+    "minimal",
+    "contrast",
+    "auto",
+];
 
 fn d_mods() -> Vec<String> { vec!["Control".to_string(), "Shift".to_string()] }
 fn d_key() -> String { "Space".to_string() }
@@ -66,6 +83,8 @@ fn d_stats_ms() -> u32 { 1000 }
 fn d_stats_items() -> Vec<String> {
     STAT_ITEMS.iter().map(|s| s.to_string()).collect()
 }
+fn d_theme() -> String { "liquid".to_string() }
+fn d_opacity() -> f32 { 0.74 }
 
 impl AppConfig {
     // Clamp values from old or hand-edited configs so nothing downstream gets garbage
@@ -83,6 +102,13 @@ impl AppConfig {
             }
         }
         self.stats_items = items;
+        if !THEMES.contains(&self.theme.as_str()) {
+            self.theme = d_theme();
+        }
+        if !self.card_opacity.is_finite() {
+            self.card_opacity = d_opacity();
+        }
+        self.card_opacity = self.card_opacity.clamp(0.4, 1.0);
     }
 }
 
@@ -112,6 +138,9 @@ impl Default for AppConfig {
             stats_items: d_stats_items(),
             stats_in_island: false,
             stats_alerts: false,
+            theme: d_theme(),
+            accent_from_art: true,
+            card_opacity: d_opacity(),
         }
     }
 }

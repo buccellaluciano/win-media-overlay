@@ -198,6 +198,35 @@
       </div>
 
       <div class="settings-content">
+        <!-- Appearance -->
+        <div class="setting-group">
+          <label class="setting-label">Tema</label>
+          <div class="theme-grid" id="themeGrid">
+            <button class="theme-swatch" data-theme="liquid" title="Liquid Glass"><span class="sw"></span><span>Liquid</span></button>
+            <button class="theme-swatch" data-theme="frost" title="Cristal claro"><span class="sw"></span><span>Cristal</span></button>
+            <button class="theme-swatch" data-theme="oled" title="OLED negro"><span class="sw"></span><span>OLED</span></button>
+            <button class="theme-swatch" data-theme="mica" title="Mica de Windows 11"><span class="sw"></span><span>Mica</span></button>
+            <button class="theme-swatch" data-theme="neon" title="Neón"><span class="sw"></span><span>Neón</span></button>
+            <button class="theme-swatch" data-theme="sunset" title="Atardecer"><span class="sw"></span><span>Atardecer</span></button>
+            <button class="theme-swatch" data-theme="minimal" title="Minimal"><span class="sw"></span><span>Minimal</span></button>
+            <button class="theme-swatch" data-theme="contrast" title="Alto contraste"><span class="sw"></span><span>Contraste</span></button>
+            <button class="theme-swatch" data-theme="auto" title="Automático (sistema)"><span class="sw"></span><span>Auto</span></button>
+          </div>
+          <div class="theme-hint">Vista previa inmediata; se guarda con “Guardar Preferencias”.</div>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Acento según la carátula</span>
+            <input type="checkbox" id="chkAccentFromArt" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="opacity-row">
+            <span class="plus-sign">Opacidad</span>
+            <input type="range" id="cardOpacityRange" min="0.4" max="1" step="0.01" value="0.74">
+            <span class="opacity-value" id="cardOpacityValue">74 %</span>
+          </div>
+        </div>
+
         <!-- Hotkey Section -->
         <div class="setting-group">
           <label class="setting-label">Atajo de Teclado Global (Bind)</label>
