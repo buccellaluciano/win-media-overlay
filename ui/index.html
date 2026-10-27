@@ -13,6 +13,22 @@
     <div class="ambient-glow" id="ambientGlowA"></div>
     <div class="ambient-glow" id="ambientGlowB"></div>
 
+    <!-- Dynamic Island: compact + activity states -->
+    <div class="island-compact" id="islandCompact">
+      <img class="island-art" id="islandArt" alt="">
+      <div class="island-title-box" id="islandTitleBox">
+        <span class="island-title" id="islandTitle">Sin reproducción</span>
+      </div>
+      <div class="island-eq" id="islandEq"><i></i><i></i><i></i></div>
+    </div>
+    <div class="island-activity" id="islandActivity">
+      <img class="island-activity-art" id="islandActivityArt" alt="">
+      <div class="island-activity-text">
+        <span class="island-activity-label" id="islandActivityLabel">Ahora suena</span>
+        <span class="island-activity-title" id="islandActivityTitle"></span>
+      </div>
+    </div>
+
     <!-- Volume Toast Indicator -->
     <div class="volume-toast" id="volumeToast">🔊 Volumen</div>
 
@@ -227,6 +243,46 @@
             <option value="0.05">5 %</option>
             <option value="0.1">10 %</option>
           </select>
+        </div>
+
+        <!-- Dynamic Island -->
+        <div class="setting-group">
+          <label class="setting-label">Isla dinámica</label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Isla dinámica (compacta + actividades)</span>
+            <input type="checkbox" id="chkIslandEnabled" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Compacta siempre visible sin reproducción</span>
+            <input type="checkbox" id="chkIslandAlwaysVisible" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Notificaciones de pista y fuente</span>
+            <input type="checkbox" id="chkIslandActivities" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="toggle-item">
+            <span class="toggle-text">Permitir clics a través en modo compacto</span>
+            <input type="checkbox" id="chkIslandClickThrough" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="key-selector-row">
+            <span class="plus-sign">Retardo al expandir</span>
+            <select class="key-select" id="expandDelaySelect">
+              <option value="0">Sin retardo</option>
+              <option value="150">150 ms</option>
+              <option value="250">250 ms</option>
+              <option value="500">500 ms</option>
+              <option value="1000">1000 ms</option>
+            </select>
+          </div>
         </div>
 
         <!-- Toggles Section -->

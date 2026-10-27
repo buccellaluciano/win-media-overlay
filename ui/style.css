@@ -58,7 +58,8 @@ html, body {
 .liquid-card {
   position: relative;
   z-index: 1;
-  margin: 6px;
+  width: calc(100% - 12px);
+  margin: 6px auto;
   border-radius: var(--radius-card);
   background: var(--bg-translucent);
   backdrop-filter: blur(30px) saturate(180%);
@@ -72,10 +73,181 @@ html, body {
   display: flex;
   flex-direction: column;
   transition:
+    width 0.22s var(--transition-smooth),
+    height 0.22s var(--transition-smooth),
+    border-radius 0.22s var(--transition-smooth),
     box-shadow 0.35s var(--transition-smooth),
     border-color 0.35s var(--transition-smooth),
     transform 0.22s var(--transition-smooth),
     opacity 0.22s ease;
+}
+
+/* No mode yet (first frame): stay invisible so the wrong size never flashes */
+html:not([data-mode]) .liquid-card,
+html[data-mode="hidden"] .liquid-card {
+  opacity: 0;
+}
+
+/* Dynamic Island sizes: the native window matches these exactly (no transparent hit area) */
+html[data-mode="compact"] .liquid-card {
+  width: 240px;
+  height: 36px;
+  margin: 0 auto;
+  border-radius: 18px;
+}
+
+html[data-mode="activity"] .liquid-card {
+  width: 340px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 28px;
+}
+
+/* Compact / activity replace the full player */
+html:is([data-mode="compact"], [data-mode="activity"]) .card-header,
+html:is([data-mode="compact"], [data-mode="activity"]) .player-body,
+html:is([data-mode="compact"], [data-mode="activity"]) .lyrics-panel,
+html:is([data-mode="compact"], [data-mode="activity"]) .settings-panel,
+html:is([data-mode="compact"], [data-mode="activity"]) .source-popover,
+html:is([data-mode="compact"], [data-mode="activity"]) .volume-toast {
+  display: none !important;
+}
+
+/* Compact island */
+.island-compact {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 12px;
+  position: relative;
+  z-index: 1;
+  animation: islandFadeIn 0.18s ease;
+}
+
+html[data-mode="compact"] .island-compact {
+  display: flex;
+}
+
+.island-art {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.island-title-box {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+}
+
+.island-title {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  color: var(--text-primary);
+}
+
+.island-title.scrollable {
+  animation: marquee 10s ease-in-out infinite alternate;
+}
+
+/* Mini equalizer (only while playing) */
+.island-eq {
+  display: none;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.island-eq.playing {
+  display: flex;
+}
+
+.island-eq i {
+  display: block;
+  width: 3px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent-color);
+  animation: islandEq 0.9s ease-in-out infinite;
+}
+
+.island-eq i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.island-eq i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes islandEq {
+  0%, 100% { height: 4px; }
+  50% { height: 14px; }
+}
+
+/* Activity notification */
+.island-activity {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 14px;
+  position: relative;
+  z-index: 1;
+  animation: islandFadeIn 0.18s ease;
+}
+
+html[data-mode="activity"] .island-activity {
+  display: flex;
+}
+
+.island-activity-art {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.island-activity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.island-activity-label {
+  font-size: 8.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+}
+
+.island-activity-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes islandFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* Dynamic Island tucked-away state (animated by JS on reveal/hide) */

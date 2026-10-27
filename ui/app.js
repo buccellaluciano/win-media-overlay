@@ -63,6 +63,22 @@ const chkRespectFullscreen = document.getElementById("chkRespectFullscreen");
 const chkLyrics = document.getElementById("chkLyrics");
 const volumeStepSelect = document.getElementById("volumeStepSelect");
 const bindError = document.getElementById("bindError");
+const chkIslandEnabled = document.getElementById("chkIslandEnabled");
+const chkIslandAlwaysVisible = document.getElementById("chkIslandAlwaysVisible");
+const chkIslandActivities = document.getElementById("chkIslandActivities");
+const chkIslandClickThrough = document.getElementById("chkIslandClickThrough");
+const expandDelaySelect = document.getElementById("expandDelaySelect");
+
+// Dynamic Island elements
+const islandCompact = document.getElementById("islandCompact");
+const islandArt = document.getElementById("islandArt");
+const islandTitle = document.getElementById("islandTitle");
+const islandTitleBox = document.getElementById("islandTitleBox");
+const islandEq = document.getElementById("islandEq");
+const islandActivity = document.getElementById("islandActivity");
+const islandActivityArt = document.getElementById("islandActivityArt");
+const islandActivityLabel = document.getElementById("islandActivityLabel");
+const islandActivityTitle = document.getElementById("islandActivityTitle");
 
 // Lyrics Elements
 const lyricsPanel = document.getElementById("lyricsPanel");
@@ -77,7 +93,12 @@ let currentIsPlaying = false;
 let isSettingsOpen = false;
 let settingsBusy = false;
 let configDirty = false;
+let currentWindowWidth = 480;
 let currentWindowHeight = 188;
+let islandMode = ""; // compact | activity | expanded | hidden, owned by the backend
+let lastMediaState = null;
+let lastIslandTrackKey = "";
+let lastIslandSource = "";
 let isSourcePopoverOpen = false;
 let selectedSourceId = null;
 let currentMasterVolume = 0.5;
@@ -392,7 +413,10 @@ function updateLyricsForState(state) {
 
 // Centralized window resize: skips redundant OS resizes (each one re-layouts + re-blurs the card)
 async function setWindowSize(width, height) {
-  if (height === currentWindowHeight) return;
+  // Compact/activity sizes are owned by the backend; content only resizes expanded
+  if (islandMode && islandMode !== "expanded") return;
+  if (width === currentWindowWidth && height === currentWindowHeight) return;
+  currentWindowWidth = width;
   currentWindowHeight = height;
   try {
     await invoke("set_window_size", { width, height });
@@ -445,9 +469,146 @@ function checkMarquee(element, container) {
   }
 }
 
+// =========================================================
+// Dynamic Island (compact / activity / expanded)
+// =========================================================
+
+const activityQueue = [];
+let activityShowing = false;
+let activityTimer = null;
+let lastActivityKey = "";
+let shownActivityKey = "";
+
+function setIslandArt(src) {
+  if (src) {
+    if (islandArt.getAttribute("src") !== src) islandArt.src = src;
+    islandArt.classList.add("has-art");
+  } else {
+    islandArt.removeAttribute("src");
+    islandArt.classList.remove("has-art");
+  }
+}
+
+function updateIslandCompact(state) {
+  const has = !!(state && state.has_session);
+  const title = has ? state.title || "Sin reproducción" : "Sin reproducción";
+  if (islandTitle.textContent !== title) {
+    islandTitle.textContent = title;
+    requestAnimationFrame(() => checkMarquee(islandTitle, islandTitleBox));
+  }
+  islandEq.classList.toggle("playing", !!(state && state.is_playing));
+  setIslandArt(has ? state.thumbnail_base64 || lastThumbnailBase64 : null);
+}
+
+function renderIslandActivity(item) {
+  islandActivityLabel.textContent = item.label;
+  islandActivityTitle.textContent = item.text; // textContent: never innerHTML with metadata
+  if (item.art) {
+    islandActivityArt.src = item.art;
+    islandActivityArt.classList.add("has-art");
+  } else {
+    islandActivityArt.removeAttribute("src");
+    islandActivityArt.classList.remove("has-art");
+  }
+}
+
+function clearActivities() {
+  activityQueue.length = 0;
+  activityShowing = false;
+  shownActivityKey = "";
+  if (activityTimer) {
+    clearTimeout(activityTimer);
+    activityTimer = null;
+  }
+}
+
+// Queue max 3, no consecutive duplicates; only while compact
+function enqueueActivity(item) {
+  if (!appConfig || !appConfig.island_enabled || !appConfig.island_activities) return;
+  if (islandMode !== "compact") return; // expanded already shows this info
+  if (!item || !item.text) return;
+  // Repeated activity (e.g. wheel volume): refresh the visible text instead of queuing
+  if (activityShowing && item.key === shownActivityKey) {
+    islandActivityTitle.textContent = item.text;
+    lastActivityKey = item.key;
+    return;
+  }
+  if (item.key === lastActivityKey) return;
+  if (activityQueue.length >= 3) return;
+  activityQueue.push(item);
+  lastActivityKey = item.key;
+  if (!activityShowing) void showNextActivity();
+}
+
+async function showNextActivity() {
+  const item = activityQueue.shift();
+  if (!item) {
+    activityShowing = false;
+    return;
+  }
+  activityShowing = true;
+  shownActivityKey = item.key;
+  renderIslandActivity(item);
+  try {
+    await invoke("request_island_mode", { mode: "activity" });
+  } catch (err) {
+    console.error("Island activity error:", err);
+    activityShowing = false;
+    return;
+  }
+  if (activityTimer) clearTimeout(activityTimer);
+  activityTimer = setTimeout(async () => {
+    activityTimer = null;
+    if (activityQueue.length) {
+      void showNextActivity();
+      return;
+    }
+    activityShowing = false;
+    shownActivityKey = "";
+    // Allow the same activity (e.g. volume) to show again after a gap
+    lastActivityKey = "";
+    // The user may have expanded while the activity was showing
+    if (islandMode !== "activity") return;
+    try {
+      await invoke("request_island_mode", { mode: "compact" });
+    } catch (err) {
+      console.error("Island activity end error:", err);
+    }
+  }, 2500);
+}
+
+// Single place where the frontend mirrors the backend island state
+function applyIslandMode(mode, width, height) {
+  if (!mode) return;
+  islandMode = mode;
+  document.documentElement.dataset.mode = mode;
+  if (Number.isFinite(width) && Number.isFinite(height) && mode !== "hidden") {
+    currentWindowWidth = width;
+    currentWindowHeight = height;
+  }
+  liquidCard.classList.remove("island-out");
+  if (mode === "expanded") {
+    clearActivities();
+    applyLyricsPanelDom();
+    updateLyricsPanelHeight();
+  } else if (mode === "hidden") {
+    clearActivities();
+  } else if (mode === "compact") {
+    clearActivities();
+    if (lastMediaState) updateIslandCompact(lastMediaState);
+  }
+}
+
+// Settings/popover must not collapse when the cursor leaves
+function updateIslandPin() {
+  const pinned = !!(isSettingsOpen || isSourcePopoverOpen);
+  invoke("set_island_pinned", { pinned }).catch(() => {});
+}
+
 // Update UI with incoming MediaState
 function updateMediaUI(state) {
   if (!state) return;
+  lastMediaState = state;
 
   // Track changed: the player likely recreated its audio session (volume reset)
   const vkey = trackKeyOf(state);
@@ -455,6 +616,31 @@ function updateMediaUI(state) {
     lastVolumeTrackKey = vkey;
     reapplyVolumeSoon();
   }
+
+  // Dynamic Island: transient activity on track/source change
+  if (!lastIslandTrackKey) {
+    lastIslandTrackKey = vkey;
+    lastIslandSource = state.source_app_id || "";
+  } else if (vkey !== lastIslandTrackKey) {
+    lastIslandTrackKey = vkey;
+    if (state.has_session && state.title && state.title !== "Sin reproducción") {
+      enqueueActivity({
+        key: `track:${vkey}`,
+        label: "Ahora suena",
+        text: `${state.title}${state.artist ? " — " + state.artist : ""}`,
+        art: null, // filled in when the thumbnail arrives
+      });
+    }
+  }
+  if (state.has_session && lastIslandSource && state.source_app_id !== lastIslandSource) {
+    enqueueActivity({
+      key: `src:${state.source_app_id}`,
+      label: "Fuente de audio",
+      text: state.source_name || "Windows Media",
+      art: state.thumbnail_base64 || lastThumbnailBase64,
+    });
+  }
+  lastIslandSource = state.source_app_id || "";
 
   // Title, Artist, Album
   const newTitle = state.title || "Sin reproducción";
@@ -500,6 +686,11 @@ function updateMediaUI(state) {
       albumArt.classList.add("visible");
       artPlaceholder.classList.add("hidden");
       applyAccentFromArt(state.thumbnail_base64);
+      setIslandArt(state.thumbnail_base64);
+      if (islandMode === "activity") {
+        islandActivityArt.src = state.thumbnail_base64;
+        islandActivityArt.classList.add("has-art");
+      }
       if (appConfig && appConfig.ambient_glow) {
         setAmbientGlow(state.thumbnail_base64);
       }
@@ -521,6 +712,11 @@ function updateMediaUI(state) {
         albumArt.classList.add("visible");
         artPlaceholder.classList.add("hidden");
         applyAccentFromArt(b64);
+        setIslandArt(b64);
+        if (islandMode === "activity") {
+          islandActivityArt.src = b64;
+          islandActivityArt.classList.add("has-art");
+        }
         if (appConfig && appConfig.ambient_glow) {
           setAmbientGlow(b64);
         }
@@ -546,6 +742,9 @@ function updateMediaUI(state) {
 
   // Synced lyrics follow the track/position
   updateLyricsForState(state);
+
+  // Compact island mirrors the same state
+  updateIslandCompact(state);
 }
 
 // One-shot refresh right after switching source (don't wait for the 350ms poll)
@@ -612,7 +811,12 @@ btnNext.addEventListener("click", async () => {
 
 btnHide.addEventListener("click", async () => {
   try {
-    await invoke("hide_window");
+    if (appConfig && appConfig.island_enabled) {
+      // Collapse to compact instead of hiding the window out-of-band
+      await invoke("request_island_mode", { mode: "compact" });
+    } else {
+      await invoke("hide_window");
+    }
   } catch (err) {
     console.error("Hide error:", err);
   }
@@ -789,11 +993,22 @@ liquidCard.addEventListener("wheel", async (e) => {
   updateVolumeUI(newLevel, false);
   showVolumeToast(delta > 0 ? 1 : -1);
   pushMasterVolume(newLevel);
+
+  // Compact island: the toast is hidden there, so surface the level as an activity
+  if (islandMode === "compact") {
+    enqueueActivity({
+      key: "volume",
+      label: "Volumen",
+      text: `${Math.round(newLevel * 100)} %`,
+      art: null,
+    });
+  }
 }, { passive: false });
 
 // Audio Source Selector Popover
 async function toggleSourcePopover(open) {
   isSourcePopoverOpen = open !== undefined ? open : !isSourcePopoverOpen;
+  updateIslandPin();
   if (isSourcePopoverOpen) {
     if (isSettingsOpen) await toggleSettings(false);
     lyricsPanel.classList.add("hidden");
@@ -956,6 +1171,7 @@ async function toggleSettings(open) {
   if (settingsBusy || target === isSettingsOpen) return;
   settingsBusy = true;
   isSettingsOpen = target;
+  updateIslandPin();
   try {
     if (isSettingsOpen) {
       if (isSourcePopoverOpen) await toggleSourcePopover(false);
@@ -1100,6 +1316,13 @@ async function loadConfigUI() {
     applyDraggable(appConfig.draggable !== false);
     chkRespectFullscreen.checked = appConfig.respect_fullscreen !== false;
     chkLyrics.checked = !!appConfig.lyrics_enabled;
+    chkIslandEnabled.checked = appConfig.island_enabled !== false;
+    chkIslandAlwaysVisible.checked = appConfig.island_always_visible !== false;
+    chkIslandActivities.checked = appConfig.island_activities !== false;
+    chkIslandClickThrough.checked = !!appConfig.island_click_through_compact;
+    const delay = String(Number(appConfig.hover_expand_delay_ms));
+    const delays = ["0", "150", "250", "500", "1000"];
+    expandDelaySelect.value = delays.includes(delay) ? delay : "250";
     updateHoverRevealIcon();
 
     if (!chkAmbientGlow.checked) {
@@ -1127,6 +1350,11 @@ btnSaveConfig.addEventListener("click", async () => {
     draggable: chkDraggable.checked,
     respect_fullscreen: chkRespectFullscreen.checked,
     lyrics_enabled: chkLyrics.checked,
+    island_enabled: chkIslandEnabled.checked,
+    island_always_visible: chkIslandAlwaysVisible.checked,
+    island_activities: chkIslandActivities.checked,
+    island_click_through_compact: chkIslandClickThrough.checked,
+    hover_expand_delay_ms: Number(expandDelaySelect.value) || 0,
   };
 
   try {
@@ -1167,13 +1395,17 @@ btnSaveConfig.addEventListener("click", async () => {
   }
 });
 
-// Escape key to hide
+// Escape key to hide (in island mode it collapses instead of hiding the window)
 window.addEventListener("keydown", async (e) => {
   if (e.key === "Escape") {
     if (isSourcePopoverOpen) {
       toggleSourcePopover(false);
     } else if (isSettingsOpen) {
       toggleSettings(false);
+    } else if (appConfig && appConfig.island_enabled) {
+      if (islandMode === "expanded") {
+        invoke("request_island_mode", { mode: "compact" }).catch(() => {});
+      }
     } else {
       await invoke("hide_window");
     }
@@ -1183,6 +1415,16 @@ window.addEventListener("keydown", async (e) => {
 // Native window dragging via Tauri start_drag command
 document.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return; // Only primary mouse button
+
+  // Compact/activity: a click expands the island (dragging happens in expanded mode)
+  if (islandMode === "compact" || islandMode === "activity") {
+    if (appConfig && appConfig.island_enabled) {
+      invoke("request_island_mode", { mode: "expanded" }).catch((err) => {
+        console.warn("expand error:", err);
+      });
+    }
+    return;
+  }
 
   // Dragging disabled by the user setting
   if (appConfig && appConfig.draggable === false) return;
@@ -1248,6 +1490,16 @@ function startTimelineTicker() {
 // Initialization
 async function init() {
   await loadConfigUI();
+
+  // Apply the island state before the first content paint
+  try {
+    const info = await invoke("get_island_mode");
+    applyIslandMode(info.mode, info.width, info.height);
+  } catch (err) {
+    console.warn("Island mode unavailable:", err);
+    applyIslandMode("expanded", 480, 188);
+  }
+
   await syncMasterVolume();
 
   // Initial media state request
@@ -1271,6 +1523,12 @@ async function init() {
     } else {
       liquidCard.classList.add("island-out");
     }
+  });
+
+  // Island state changes (compact / activity / expanded / hidden)
+  await listen("island-mode", (event) => {
+    const payload = event.payload || {};
+    applyIslandMode(payload.mode, payload.width, payload.height);
   });
 
   // Safety: never leave the card faded out when the window is focused/shown (hotkey, click)

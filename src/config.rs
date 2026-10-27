@@ -31,6 +31,16 @@ pub struct AppConfig {
     pub respect_fullscreen: bool, // true: stay on top, but step aside while a fullscreen app is in front
     #[serde(default)]
     pub lyrics_enabled: bool, // opt-in: fetch synced lyrics from LRCLIB and show them under the player
+    #[serde(default = "d_true")]
+    pub island_enabled: bool, // real Dynamic Island: compact/activity/expanded states
+    #[serde(default = "d_true")]
+    pub island_always_visible: bool, // compact visible even without a media session
+    #[serde(default = "d_true")]
+    pub island_activities: bool, // transient notifications on track/source changes
+    #[serde(default)]
+    pub island_click_through_compact: bool, // compact mode ignores the mouse unless hovered
+    #[serde(default = "d_expand")]
+    pub hover_expand_delay_ms: u32, // hover time before compact expands, 0..=1500
 }
 
 fn d_mods() -> Vec<String> { vec!["Control".to_string(), "Shift".to_string()] }
@@ -39,6 +49,7 @@ fn d_preset() -> String { "top-center".to_string() }
 fn d_custom() -> i32 { 100 }
 fn d_true() -> bool { true }
 fn d_step() -> f64 { 0.05 }
+fn d_expand() -> u32 { 250 }
 
 impl AppConfig {
     // Clamp values from old or hand-edited configs so nothing downstream gets garbage
@@ -47,6 +58,7 @@ impl AppConfig {
             self.volume_step = d_step();
         }
         self.volume_step = self.volume_step.clamp(0.01, 0.2);
+        self.hover_expand_delay_ms = self.hover_expand_delay_ms.min(1500);
     }
 }
 
@@ -66,6 +78,11 @@ impl Default for AppConfig {
             draggable: true,
             respect_fullscreen: true,
             lyrics_enabled: false,
+            island_enabled: true,
+            island_always_visible: true,
+            island_activities: true,
+            island_click_through_compact: false,
+            hover_expand_delay_ms: 250,
         }
     }
 }

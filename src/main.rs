@@ -12,7 +12,7 @@ mod volume;
 use config::{load_config, save_config, AppConfig};
 use hotkey::HotkeyManager;
 use media::{MediaController, MediaState};
-use position::{apply_top_center_on_monitor, apply_window_position};
+use position::{apply_top_center_on_monitor, apply_top_center_size, apply_window_position};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -36,6 +36,56 @@ pub struct AppState {
     pub last_shown: Mutex<Instant>,
     // Set by the fullscreen watcher so config changes can't re-assert topmost over a game
     pub fullscreen_active: AtomicBool,
+    // Dynamic Island state: who the window is, owned by the backend
+    pub island_mode: Mutex<IslandMode>,
+    pub island_prev_mode: Mutex<IslandMode>,
+    pub island_pinned: AtomicBool, // settings/popover open: don't collapse on hover-out
+    pub island_ignore: AtomicBool, // click-through active in compact mode
+    pub has_media: AtomicBool,     // updated by the polling loop, read by the hover watcher
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IslandMode {
+    Hidden,
+    Compact,
+    Activity,
+    Expanded,
+}
+
+impl IslandMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            IslandMode::Hidden => "hidden",
+            IslandMode::Compact => "compact",
+            IslandMode::Activity => "activity",
+            IslandMode::Expanded => "expanded",
+        }
+    }
+
+    fn size(self) -> Option<(f64, f64)> {
+        match self {
+            IslandMode::Hidden => None,
+            IslandMode::Compact => Some((240.0, 36.0)),
+            IslandMode::Activity => Some((340.0, 56.0)),
+            IslandMode::Expanded => Some((480.0, 188.0)),
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            IslandMode::Hidden => 0,
+            IslandMode::Compact => 1,
+            IslandMode::Activity => 2,
+            IslandMode::Expanded => 3,
+        }
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+struct IslandModePayload {
+    mode: &'static str,
+    width: f64,
+    height: f64,
 }
 
 // Per-app desired volume/mute (in-memory): lets us re-apply after a player recreates its audio session
@@ -217,11 +267,14 @@ fn update_app_config(
     new_config: AppConfig,
     state: tauri::State<'_, AppState>,
     window: WebviewWindow,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     // Register the hotkey first: if another app owns it, nothing is persisted and the UI can revert
     if let Some(mgr) = state.hotkey_mgr.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         mgr.update_hotkey(new_config.hotkey_modifiers.clone(), new_config.hotkey_key.clone())?;
     }
+
+    let island_was_enabled = state.config.lock().unwrap_or_else(|e| e.into_inner()).island_enabled;
 
     save_config(&new_config)?;
 
@@ -237,7 +290,18 @@ fn update_app_config(
     let fullscreen = state.fullscreen_active.load(Ordering::Relaxed);
     let _ = window.set_always_on_top(!fullscreen);
 
-    *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config;
+    *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config.clone();
+
+    // Switching the island on/off takes effect now, not on the next hover tick
+    if new_config.island_enabled != island_was_enabled {
+        if new_config.island_enabled {
+            if !state.island_pinned.load(Ordering::Relaxed) {
+                set_island_mode_internal(&app, IslandMode::Compact, false);
+            }
+        } else {
+            set_island_mode_internal(&app, IslandMode::Expanded, true);
+        }
+    }
     Ok(())
 }
 
@@ -269,12 +333,41 @@ fn toggle_main_window(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         return;
     };
+    let state = app.state::<AppState>();
+    let conf = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
+
+    if conf.island_enabled {
+        let current = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
+        let pinned = state.island_pinned.load(Ordering::Relaxed);
+        if current == IslandMode::Expanded {
+            if pinned {
+                return;
+            }
+            let has_media = state.has_media.load(Ordering::Relaxed);
+            let target = if conf.island_always_visible || has_media {
+                IslandMode::Compact
+            } else {
+                IslandMode::Hidden
+            };
+            set_island_mode_internal(app, target, false);
+        } else {
+            *state.last_shown.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+            let fullscreen = state.fullscreen_active.load(Ordering::Relaxed);
+            // Activating the overlay over an exclusive-fullscreen game minimizes it
+            let no_activate = conf.respect_fullscreen && fullscreen;
+            set_island_mode_internal(app, IslandMode::Expanded, !no_activate);
+            if no_activate {
+                let _ = win.set_always_on_top(false);
+            }
+        }
+        let _ = app.emit("island-visibility", true);
+        return;
+    }
+
     if win.is_visible().unwrap_or(false) {
         let _ = win.hide();
     } else {
-        let state = app.state::<AppState>();
         *state.last_shown.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
-        let conf = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let fullscreen = state.fullscreen_active.load(Ordering::Relaxed);
         // Activating the overlay over an exclusive-fullscreen game minimizes it
         let no_activate = conf.respect_fullscreen && fullscreen;
@@ -356,6 +449,154 @@ fn monitor_at_cursor(cursor: POINT) -> Option<(MONITORINFO, f64)> {
     }
 }
 
+fn place_island(win: &WebviewWindow, logical_width: f64) {
+    if let Some(mon) = win.current_monitor().ok().flatten() {
+        let p = mon.position();
+        let s = mon.size();
+        let rect = (p.x, p.y, s.width as i32, s.height as i32);
+        let _ = apply_top_center_size(win, rect, mon.scale_factor(), logical_width);
+    }
+}
+
+fn cursor_inside_window(win: &WebviewWindow, cursor: POINT, margin: i32) -> bool {
+    match (win.outer_position(), win.outer_size()) {
+        (Ok(pos), Ok(size)) => {
+            cursor.x >= pos.x - margin
+                && cursor.x <= pos.x + size.width as i32 + margin
+                && cursor.y >= pos.y - margin
+                && cursor.y <= pos.y + size.height as i32 + margin
+        }
+        _ => false,
+    }
+}
+
+// Single point that changes island state: native size, position and frontend event.
+fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: bool) {
+    let state = app.state::<AppState>();
+    let prev = {
+        let mut current = state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
+        if *current == mode {
+            return;
+        }
+        let prev = *current;
+        *current = mode;
+        prev
+    };
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+
+    if mode == IslandMode::Hidden {
+        if prev != IslandMode::Hidden {
+            *state.island_prev_mode.lock().unwrap_or_else(|e| e.into_inner()) = prev;
+        }
+        let _ = win.set_ignore_cursor_events(false);
+        state.island_ignore.store(false, Ordering::Relaxed);
+        let _ = win.hide();
+        let _ = app.emit(
+            "island-mode",
+            IslandModePayload {
+                mode: mode.as_str(),
+                width: 0.0,
+                height: 0.0,
+            },
+        );
+        return;
+    }
+
+    let Some((width, height)) = mode.size() else {
+        return;
+    };
+    let shrink = prev.rank() > 0 && mode.rank() < prev.rank();
+
+    if mode != IslandMode::Compact {
+        let _ = win.set_ignore_cursor_events(false);
+        state.island_ignore.store(false, Ordering::Relaxed);
+    }
+
+    if shrink {
+        // Animate the CSS collapse first; the native window follows (no transparent gap)
+        let _ = app.emit(
+            "island-mode",
+            IslandModePayload {
+                mode: mode.as_str(),
+                width,
+                height,
+            },
+        );
+        let app_delayed = app.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(220));
+            let state = app_delayed.state::<AppState>();
+            if *state.island_mode.lock().unwrap_or_else(|e| e.into_inner()) != mode {
+                return;
+            }
+            if let Some(win) = app_delayed.get_webview_window("main") {
+                let _ = win.set_size(Size::Logical(LogicalSize { width, height }));
+                place_island(&win, width);
+            }
+        });
+    } else {
+        // Grow the native window first, then let the CSS animate
+        let _ = win.set_size(Size::Logical(LogicalSize { width, height }));
+        place_island(&win, width);
+        if activate {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        } else if !win.is_visible().unwrap_or(false) {
+            // Appearing for a session change must never steal focus from a game/app
+            if let Ok(hwnd) = win.hwnd() {
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                }
+            }
+        }
+        let _ = app.emit(
+            "island-mode",
+            IslandModePayload {
+                mode: mode.as_str(),
+                width,
+                height,
+            },
+        );
+    }
+}
+
+#[tauri::command]
+fn get_island_mode(state: tauri::State<'_, AppState>) -> IslandModePayload {
+    let mode = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
+    let (width, height) = mode.size().unwrap_or((0.0, 0.0));
+    IslandModePayload {
+        mode: mode.as_str(),
+        width,
+        height,
+    }
+}
+
+#[tauri::command]
+fn request_island_mode(mode: String, app: tauri::AppHandle) -> Result<(), String> {
+    let mode = match mode.as_str() {
+        "compact" => IslandMode::Compact,
+        "activity" => IslandMode::Activity,
+        "expanded" => IslandMode::Expanded,
+        _ => return Err("Modo de isla no válido".to_string()),
+    };
+    // A late activity must not shrink an island the user already expanded
+    let state = app.state::<AppState>();
+    let current = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
+    if mode == IslandMode::Activity && current == IslandMode::Expanded {
+        return Ok(());
+    }
+    set_island_mode_internal(&app, mode, false);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_island_pinned(pinned: bool, state: tauri::State<'_, AppState>) {
+    state.island_pinned.store(pinned, Ordering::Relaxed);
+}
+
 fn main() {
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("PANIC: {}\nLocation: {:?}\nBacktrace: {:?}", info, info.location(), std::backtrace::Backtrace::capture());
@@ -370,6 +611,11 @@ fn main() {
         hotkey_mgr: Mutex::new(None),
         last_shown: Mutex::new(Instant::now()),
         fullscreen_active: AtomicBool::new(false),
+        island_mode: Mutex::new(IslandMode::Hidden),
+        island_prev_mode: Mutex::new(IslandMode::Compact),
+        island_pinned: AtomicBool::new(false),
+        island_ignore: AtomicBool::new(false),
+        has_media: AtomicBool::new(false),
     };
 
     tauri::Builder::default()
@@ -392,6 +638,9 @@ fn main() {
             start_drag,
             get_app_config,
             update_app_config,
+            get_island_mode,
+            request_island_mode,
+            set_island_pinned,
             set_window_size,
             hide_window,
             toggle_window,
@@ -415,6 +664,22 @@ fn main() {
 
             // Keep the overlay on top; it only steps aside while a fullscreen app is in front
             let _ = window.set_always_on_top(true);
+
+            // Initial island state (the frontend also asks for it on startup)
+            let initial_mode = if initial_config.island_enabled {
+                if initial_config.island_always_visible {
+                    IslandMode::Compact
+                } else {
+                    IslandMode::Hidden
+                }
+            } else {
+                IslandMode::Expanded
+            };
+            if initial_mode == IslandMode::Hidden {
+                let _ = window.hide();
+            } else {
+                set_island_mode_internal(app.handle(), initial_mode, false);
+            }
 
             // Register global hotkey
             let app_handle = app.handle().clone();
@@ -470,6 +735,10 @@ fn main() {
 
                 loop {
                     let state = MediaController::get_state();
+                    app_handle_polling
+                        .state::<AppState>()
+                        .has_media
+                        .store(state.has_session, Ordering::Relaxed);
                     let selected = MediaController::selected_source_id();
                     let mut visible = true;
 
@@ -504,6 +773,7 @@ fn main() {
             thread::spawn(move || {
                 let mut outside_since: Option<Instant> = None;
                 let mut pending_hide: Option<Instant> = None;
+                let mut hover_since: Option<Instant> = None;
                 let mut fullscreen_prev = false;
                 // Cursor touching the exact top edge of a monitor, within the island's width
                 let in_reveal_zone = |mon: &MONITORINFO, scale: f64, cursor: POINT| -> bool {
@@ -518,12 +788,23 @@ fn main() {
                         && cursor.y <= rect.top + edge
                 };
                 loop {
-                    let (hover_enabled, respect_fullscreen) = {
+                    let (
+                        hover_enabled,
+                        respect_fullscreen,
+                        island_enabled,
+                        island_always_visible,
+                        click_through,
+                        expand_delay,
+                    ) = {
                         let state = app_handle_hover.state::<AppState>();
                         let conf = state.config.lock().unwrap_or_else(|e| e.into_inner());
                         (
                             conf.hover_reveal && conf.position_preset == "top-center",
                             conf.respect_fullscreen,
+                            conf.island_enabled,
+                            conf.island_always_visible,
+                            conf.island_click_through_compact,
+                            conf.hover_expand_delay_ms,
                         )
                     };
                     let fullscreen_active =
@@ -542,9 +823,122 @@ fn main() {
                             fullscreen_prev = fullscreen_active;
                             outside_since = None;
                             pending_hide = None;
+                            hover_since = None;
                         }
 
-                        if hover_enabled && !fullscreen_active {
+                        if island_enabled {
+                            let state = app_handle_hover.state::<AppState>();
+                            let mode = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
+                            let has_media = state.has_media.load(Ordering::Relaxed);
+                            let pinned = state.island_pinned.load(Ordering::Relaxed);
+
+                            if fullscreen_active {
+                                // The island can't draw over an exclusive-fullscreen game
+                                if mode != IslandMode::Hidden {
+                                    set_island_mode_internal(&app_handle_hover, IslandMode::Hidden, false);
+                                }
+                            } else {
+                                match mode {
+                                    IslandMode::Hidden => {
+                                        if has_media || island_always_visible {
+                                            let prev = *state
+                                                .island_prev_mode
+                                                .lock()
+                                                .unwrap_or_else(|e| e.into_inner());
+                                            let target = if prev == IslandMode::Expanded && !pinned {
+                                                IslandMode::Expanded
+                                            } else {
+                                                IslandMode::Compact
+                                            };
+                                            set_island_mode_internal(&app_handle_hover, target, false);
+                                        }
+                                    }
+                                    IslandMode::Compact => {
+                                        if !has_media && !island_always_visible {
+                                            set_island_mode_internal(
+                                                &app_handle_hover,
+                                                IslandMode::Hidden,
+                                                false,
+                                            );
+                                        } else {
+                                            let mut cursor = POINT::default();
+                                            if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                                                let inside = cursor_inside_window(&win, cursor, 2);
+                                                let want_ignore = click_through && !inside;
+                                                let ignore_now =
+                                                    state.island_ignore.load(Ordering::Relaxed);
+                                                if want_ignore != ignore_now {
+                                                    let _ = win.set_ignore_cursor_events(want_ignore);
+                                                    state.island_ignore.store(
+                                                        want_ignore,
+                                                        Ordering::Relaxed,
+                                                    );
+                                                }
+                                                if inside {
+                                                    match hover_since {
+                                                        Some(t)
+                                                            if t.elapsed()
+                                                                >= Duration::from_millis(
+                                                                    expand_delay as u64,
+                                                                ) =>
+                                                        {
+                                                            hover_since = None;
+                                                            set_island_mode_internal(
+                                                                &app_handle_hover,
+                                                                IslandMode::Expanded,
+                                                                false,
+                                                            );
+                                                        }
+                                                        Some(_) => {}
+                                                        None => hover_since = Some(Instant::now()),
+                                                    }
+                                                } else {
+                                                    hover_since = None;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    IslandMode::Activity => {
+                                        // The frontend owns the 2.5 s activity timer
+                                        hover_since = None;
+                                    }
+                                    IslandMode::Expanded => {
+                                        hover_since = None;
+                                        if !pinned {
+                                            let mut cursor = POINT::default();
+                                            if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                                                if cursor_inside_window(&win, cursor, 14) {
+                                                    outside_since = None;
+                                                } else {
+                                                    let now = Instant::now();
+                                                    match outside_since {
+                                                        Some(t)
+                                                            if now.duration_since(t)
+                                                                > Duration::from_millis(450) =>
+                                                        {
+                                                            outside_since = None;
+                                                            let target =
+                                                                if has_media || island_always_visible {
+                                                                    IslandMode::Compact
+                                                                } else {
+                                                                    IslandMode::Hidden
+                                                                };
+                                                            set_island_mode_internal(
+                                                                &app_handle_hover,
+                                                                target,
+                                                                false,
+                                                            );
+                                                        }
+                                                        Some(_) => {}
+                                                        None => outside_since = Some(now),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if hover_enabled && !fullscreen_active {
                             let mut cursor = POINT::default();
                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
                                 // Follow the cursor: with several monitors the window may be elsewhere
@@ -640,11 +1034,14 @@ fn main() {
                 WindowEvent::Focused(focused) => {
                     if !focused {
                         let state = app_handle_events.state::<AppState>();
-                        let auto_hide = state.config.lock().unwrap_or_else(|e| e.into_inner()).auto_hide_on_blur;
+                        let (auto_hide, island_enabled) = {
+                            let conf = state.config.lock().unwrap_or_else(|e| e.into_inner());
+                            (conf.auto_hide_on_blur, conf.island_enabled)
+                        };
                         let last_shown_time = *state.last_shown.lock().unwrap_or_else(|e| e.into_inner());
 
-                        // Guard against premature auto-hide: ignore blur within 350ms of appearing
-                        if auto_hide && last_shown_time.elapsed() > Duration::from_millis(350) {
+                        // Island mode collapses on hover-out instead of hiding on blur
+                        if auto_hide && !island_enabled && last_shown_time.elapsed() > Duration::from_millis(350) {
                             let _ = win_for_event.hide();
                         }
                     }

@@ -7,8 +7,18 @@ pub fn apply_top_center_on_monitor(
     rect: (i32, i32, i32, i32), // physical: x, y, width, height
     scale: f64,
 ) -> Result<(), String> {
+    apply_top_center_size(window, rect, scale, 480.0)
+}
+
+// Same, for an arbitrary logical width (compact/activity island sizes)
+pub fn apply_top_center_size(
+    window: &WebviewWindow,
+    rect: (i32, i32, i32, i32),
+    scale: f64,
+    logical_width: f64,
+) -> Result<(), String> {
     let (mon_x, mon_y, mon_width, _mon_height) = rect;
-    let base_width = (480.0 * scale) as i32;
+    let base_width = (logical_width * scale) as i32;
     let x = mon_x + (mon_width - base_width) / 2;
     let y = mon_y + (28.0 * scale) as i32;
     window
