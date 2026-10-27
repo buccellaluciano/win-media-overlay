@@ -70,6 +70,7 @@ const chkIslandClickThrough = document.getElementById("chkIslandClickThrough");
 const expandDelaySelect = document.getElementById("expandDelaySelect");
 
 // Dynamic Island elements
+const expandedView = document.getElementById("expandedView");
 const islandCompact = document.getElementById("islandCompact");
 const islandArt = document.getElementById("islandArt");
 const islandTitle = document.getElementById("islandTitle");
@@ -577,9 +578,55 @@ async function showNextActivity() {
   }, 2500);
 }
 
+// Animate the card between the island's explicit height and the expanded auto height.
+// Native windows can't tween, so only the card morphs and the window snaps at the right time.
+let cardMorphTimer = null;
+
+function morphCard(prevMode, mode, collapseFrom) {
+  const prevIsland = prevMode === "compact" || prevMode === "activity";
+  const nextIsland = mode === "compact" || mode === "activity";
+  if (!prevMode || prevMode === mode || mode === "hidden" || prevMode === "hidden") return;
+  if (!prevIsland && !nextIsland) return;
+
+  let from;
+  let to;
+  if (nextIsland && !prevIsland) {
+    // Collapsing: height measured before the dataset switch
+    from = collapseFrom;
+    to = mode === "compact" ? 36 : 56;
+  } else if (!nextIsland && prevIsland) {
+    // Expanding: morph up to the natural height of the expanded content
+    from = prevMode === "compact" ? 36 : 56;
+    to = Math.max(176, expandedView.scrollHeight + 2);
+  } else {
+    from = prevMode === "compact" ? 36 : 56;
+    to = mode === "compact" ? 36 : 56;
+  }
+  if (!from || !to) return;
+
+  // Same-task inline height pins the starting point; the rAF change animates it
+  liquidCard.style.height = `${from}px`;
+  void liquidCard.offsetHeight;
+  requestAnimationFrame(() => {
+    liquidCard.style.height = `${to}px`;
+  });
+
+  if (cardMorphTimer) clearTimeout(cardMorphTimer);
+  cardMorphTimer = setTimeout(() => {
+    cardMorphTimer = null;
+    liquidCard.style.height = ""; // back to auto in expanded / CSS height in island modes
+  }, 260);
+}
+
 // Single place where the frontend mirrors the backend island state
 function applyIslandMode(mode, width, height) {
   if (!mode) return;
+  const prevMode = islandMode;
+  const collapseFrom =
+    prevMode === "expanded" && (mode === "compact" || mode === "activity")
+      ? liquidCard.getBoundingClientRect().height
+      : 0;
+
   islandMode = mode;
   document.documentElement.dataset.mode = mode;
   if (Number.isFinite(width) && Number.isFinite(height) && mode !== "hidden") {
@@ -597,6 +644,8 @@ function applyIslandMode(mode, width, height) {
     clearActivities();
     if (lastMediaState) updateIslandCompact(lastMediaState);
   }
+
+  morphCard(prevMode, mode, collapseFrom);
 }
 
 // Settings/popover must not collapse when the cursor leaves

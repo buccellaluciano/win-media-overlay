@@ -103,30 +103,47 @@ html[data-mode="activity"] .liquid-card {
   border-radius: 28px;
 }
 
-/* Compact / activity replace the full player */
-html:is([data-mode="compact"], [data-mode="activity"]) .card-header,
-html:is([data-mode="compact"], [data-mode="activity"]) .player-body,
-html:is([data-mode="compact"], [data-mode="activity"]) .lyrics-panel,
-html:is([data-mode="compact"], [data-mode="activity"]) .settings-panel,
-html:is([data-mode="compact"], [data-mode="activity"]) .source-popover,
-html:is([data-mode="compact"], [data-mode="activity"]) .volume-toast {
-  display: none !important;
+/* The expanded player and the island are the same card: they crossfade while the card morphs */
+.expanded-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  opacity: 1;
+  transition: opacity 0.16s ease;
 }
 
-/* Compact island */
+html:is([data-mode="compact"], [data-mode="activity"], [data-mode="hidden"]) .expanded-view {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+/* Compact island (overlay, so it never affects the card size) */
 .island-compact {
-  display: none;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) scale(0.98);
+  width: 240px;
+  height: 36px;
+  display: flex;
   align-items: center;
   gap: 8px;
-  height: 100%;
   padding: 0 12px;
-  position: relative;
-  z-index: 1;
-  animation: islandFadeIn 0.18s ease;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s var(--transition-smooth);
 }
 
 html[data-mode="compact"] .island-compact {
-  display: flex;
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+  pointer-events: auto;
 }
 
 .island-art {
@@ -197,18 +214,25 @@ html[data-mode="compact"] .island-compact {
 
 /* Activity notification */
 .island-activity {
-  display: none;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) scale(0.98);
+  width: 340px;
+  height: 56px;
+  display: flex;
   align-items: center;
   gap: 10px;
-  height: 100%;
   padding: 0 14px;
-  position: relative;
-  z-index: 1;
-  animation: islandFadeIn 0.18s ease;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s var(--transition-smooth);
 }
 
 html[data-mode="activity"] .island-activity {
-  display: flex;
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
 }
 
 .island-activity-art {
@@ -243,11 +267,6 @@ html[data-mode="activity"] .island-activity {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-@keyframes islandFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 
 /* Dynamic Island tucked-away state (animated by JS on reveal/hide) */
