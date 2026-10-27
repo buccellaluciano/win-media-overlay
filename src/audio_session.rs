@@ -1,30 +1,42 @@
 // Per-application volume via the Windows audio session API (WASAPI mixer).
-// ponytail: matches GSMTC app -> WASAPI session by process image name; heuristic, falls back to system volume upstream
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
+// ponytail: app -> session matching uses the audio session identifier (which embeds the
+// exe path), so we never query other processes (anticheat/AV pattern).
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use windows::core::{Interface, PWSTR};
-use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Media::Audio::{
-    eMultimedia, eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
-    ISimpleAudioVolume, MMDeviceEnumerator,
+    eMultimedia, eRender, AudioSessionStateActive, IAudioSessionControl2, IAudioSessionManager2,
+    IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
-use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-};
+
+struct SessionEntry {
+    stem: String,
+    volume: ISimpleAudioVolume,
+    active: bool,
+}
+
+// pid -> (exe stem, cached at). Short TTL: players recreate their session on track change.
+static STEM_CACHE: Mutex<Option<HashMap<u32, (String, Instant)>>> = Mutex::new(None);
+const STEM_CACHE_TTL: Duration = Duration::from_secs(5);
 
 fn expected_stems(app_id: &str) -> Vec<String> {
     let lower = app_id.to_lowercase();
     let mut v = Vec::new();
+    // Firefox's AUMID is a hash, not a name: map it before the generic heuristics
+    if lower.contains("308046b0af4a39cb") {
+        v.push("firefox".to_string());
+    }
     if lower.contains("spotify") {
         v.push("spotify".to_string());
     }
     if lower.contains("chrome") {
         v.push("chrome".to_string());
     }
-    if lower.contains("msedge") || lower.contains("edge") {
+    if lower.contains("msedge") || lower.starts_with("msedge") {
         v.push("msedge".to_string());
     }
     if lower.contains("firefox") {
@@ -57,31 +69,71 @@ fn expected_stems(app_id: &str) -> Vec<String> {
     v
 }
 
-// Full image path -> lowercased exe stem (e.g. "...\brave.exe" -> "brave")
-unsafe fn image_stem(pid: u32) -> Option<String> {
+// "{...}|\\Device\\HarddiskVolume3\\...\\Spotify.exe%b{...}|1%b12345" -> "spotify"
+fn stem_from_instance_identifier(raw: &str) -> Option<String> {
+    for part in raw.split('|') {
+        // The instance part appends "%b{guid}" style metadata after the path
+        let path = part.split('%').next().unwrap_or(part).trim();
+        if path.is_empty() {
+            continue;
+        }
+        let name = path.rsplit('\\').next()?.trim();
+        let lower = name.to_lowercase();
+        let Some(stem) = lower.strip_suffix(".exe") else {
+            continue;
+        };
+        let stem = stem.trim();
+        if !stem.is_empty() {
+            return Some(stem.to_string());
+        }
+    }
+    None
+}
+
+unsafe fn take_pwstr(p: PWSTR) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    let value = p.to_string().ok();
+    CoTaskMemFree(Some(p.0 as *const core::ffi::c_void));
+    value
+}
+
+// Exe stem for a session, cached per pid so a slider drag doesn't reparse every tick
+unsafe fn session_stem(control: &IAudioSessionControl2) -> Option<String> {
+    let pid = control.GetProcessId().ok()?;
     if pid == 0 {
         return None;
     }
-    let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-    let mut buf = [0u16; 1024];
-    let mut size = buf.len() as u32;
-    let res = QueryFullProcessImageNameW(
-        handle,
-        PROCESS_NAME_WIN32,
-        PWSTR(buf.as_mut_ptr()),
-        &mut size,
-    );
-    let _ = CloseHandle(handle);
-    res.ok()?;
-    let path = OsString::from_wide(&buf[..size as usize]);
-    let name = std::path::Path::new(&path)
-        .file_name()?
-        .to_string_lossy()
-        .to_lowercase();
-    Some(name.trim_end_matches(".exe").to_string())
+    if let Ok(mut guard) = STEM_CACHE.lock() {
+        if let Some(map) = guard.as_mut() {
+            if let Some((stem, at)) = map.get(&pid) {
+                if at.elapsed() < STEM_CACHE_TTL {
+                    return Some(stem.clone());
+                }
+            }
+        }
+    }
+    let raw = control
+        .GetSessionInstanceIdentifier()
+        .ok()
+        .and_then(|p| take_pwstr(p))
+        .or_else(|| {
+            control
+                .GetSessionIdentifier()
+                .ok()
+                .and_then(|p| take_pwstr(p))
+        })?;
+    let stem = stem_from_instance_identifier(&raw)?;
+    if let Ok(mut guard) = STEM_CACHE.lock() {
+        guard
+            .get_or_insert_with(HashMap::new)
+            .insert(pid, (stem.clone(), Instant::now()));
+    }
+    Some(stem)
 }
 
-fn enumerate_sessions() -> Vec<(String, ISimpleAudioVolume)> {
+fn enumerate_sessions() -> Vec<SessionEntry> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let enumerator: IMMDeviceEnumerator =
@@ -115,16 +167,18 @@ fn enumerate_sessions() -> Vec<(String, ISimpleAudioVolume)> {
             if control2.IsSystemSoundsSession().0 == 0 {
                 continue;
             }
-            let Ok(pid) = control2.GetProcessId() else {
-                continue;
-            };
-            let Some(stem) = image_stem(pid) else {
+            let Some(stem) = session_stem(&control2) else {
                 continue;
             };
             let Ok(volume): std::result::Result<ISimpleAudioVolume, _> = control2.cast() else {
                 continue;
             };
-            out.push((stem, volume));
+            let active = matches!(control.GetState(), Ok(state) if state == AudioSessionStateActive);
+            out.push(SessionEntry {
+                stem,
+                volume,
+                active,
+            });
         }
         out
     }
@@ -134,15 +188,27 @@ fn enumerate_sessions() -> Vec<(String, ISimpleAudioVolume)> {
 // so a cached session writes the wrong one and the new session keeps the default volume.
 fn sessions_for_app(app_id: &str) -> Vec<ISimpleAudioVolume> {
     let expected = expected_stems(app_id);
-    enumerate_sessions()
-        .into_iter()
-        .filter(|(stem, _)| {
-            expected
-                .iter()
-                .any(|e| stem == e || stem.contains(e.as_str()))
-        })
-        .map(|(_, v)| v)
-        .collect()
+    let mut matched = Vec::new();
+    let mut active = Vec::new();
+    for entry in enumerate_sessions() {
+        if expected
+            .iter()
+            .any(|e| entry.stem == *e || entry.stem.contains(e.as_str()))
+        {
+            matched.push(entry.volume.clone());
+        }
+        if entry.active {
+            active.push(entry.volume);
+        }
+    }
+    if !matched.is_empty() {
+        return matched;
+    }
+    // Opaque AUMID (e.g. Firefox): if exactly one app session is active, that's the one playing
+    if active.len() == 1 {
+        return active;
+    }
+    Vec::new()
 }
 
 pub fn get_volume(app_id: &str) -> Result<f32, String> {

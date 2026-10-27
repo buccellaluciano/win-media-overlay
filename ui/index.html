@@ -17,8 +17,8 @@
     <div class="volume-toast" id="volumeToast">🔊 Volumen</div>
 
     <!-- Top Pill Bar (Draggable Region) -->
-    <header class="card-header" data-tauri-drag-region>
-      <div class="header-left" data-tauri-drag-region>
+    <header class="card-header">
+      <div class="header-left">
         <button class="app-badge" id="appBadge" title="Seleccionar fuente de audio (Spotify, Chrome, Edge...)">
           <span class="badge-dot"></span>
           <span class="badge-name" id="badgeName">Windows Media</span>
@@ -28,7 +28,7 @@
         </button>
       </div>
       
-      <div class="header-center" data-tauri-drag-region>
+      <div class="header-center">
         <div class="island-indicator"></div>
       </div>
 
@@ -86,7 +86,7 @@
       <!-- Track Info & Controls -->
       <div class="content-container">
         <!-- Title and Artist -->
-        <div class="metadata-wrapper" data-tauri-drag-region>
+        <div class="metadata-wrapper">
           <div class="track-title-box" id="titleBox">
             <span class="track-title" id="trackTitle">Sin reproducción</span>
           </div>
@@ -163,8 +163,8 @@
     </main>
 
     <!-- Lyrics Panel (auto-shows only when synced lyrics are available) -->
-    <section class="lyrics-panel hidden" id="lyricsPanel" data-tauri-drag-region>
-      <div class="lyrics-scroll" id="lyricsScroll" data-tauri-drag-region>
+    <section class="lyrics-panel hidden" id="lyricsPanel">
+      <div class="lyrics-scroll" id="lyricsScroll">
         <div class="lyrics-lines" id="lyricsLines"></div>
       </div>
     </section>
@@ -215,6 +215,18 @@
           <div class="current-bind-display">
             Bind actual: <span class="bind-badge" id="bindBadge">Ctrl + Shift + Espacio</span>
           </div>
+          <div class="bind-error hidden" id="bindError"></div>
+        </div>
+
+        <!-- Mouse wheel volume step -->
+        <div class="setting-group">
+          <label class="setting-label" for="volumeStepSelect">Paso de volumen (rueda del ratón)</label>
+          <select class="key-select" id="volumeStepSelect">
+            <option value="0.01">1 %</option>
+            <option value="0.02">2 %</option>
+            <option value="0.05">5 %</option>
+            <option value="0.1">10 %</option>
+          </select>
         </div>
 
         <!-- Toggles Section -->

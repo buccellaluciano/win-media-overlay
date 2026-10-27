@@ -6,6 +6,14 @@
   "build": {
     "frontendDist": "ui"
   },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.png", "icons/128x128.png", "icons/icon.ico"],
+    "publisher": "WMO",
+    "copyright": "© 2026 WMO",
+    "shortDescription": "Overlay de medios estilo Liquid Glass para Windows 11",
+    "longDescription": "WMO (Win11 Media Overlay) es un control flotante y ultraligero para la reproducción de música en Windows 11, con integración GSMTC, volumen por aplicación y letras sincronizadas opcionales."
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [

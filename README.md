@@ -26,7 +26,7 @@ Construida con **Tauri 2 + Rust + Vanilla HTML5/CSS3/JS**, compilada 100% offlin
 - **Opciones de Comportamiento**:
   - **Icono en la bandeja del sistema (tray)**: clic izquierdo muestra/oculta; clic derecho → *Mostrar / Ocultar* y **Salir** (cierra la app por completo).
   - **Revelar al pasar el ratón**: icono en la barra superior (a la izquierda del engranaje). Al activarlo, la app se oculta arriba al centro y reaparece al posar el cursor en la franja superior.
-  - **Respetar pantalla completa**: la app queda siempre encima (juegos borderless, ventanas, etc.), pero se aparta automáticamente solo cuando hay una app en **fullscreen exclusivo** (D3D) en primer plano, para no minimizarla; vuelve al salir.
+  - **Respetar pantalla completa**: la app queda siempre encima (juegos borderless, ventanas, etc.), pero se aparta automáticamente solo cuando hay una app en **fullscreen exclusivo** (D3D) en primer plano, para no minimizarla; vuelve al salir. En fullscreen exclusivo Windows no permite dibujar el overlay encima sin minimizar el juego: en ese caso se muestra sin robar el foco y puede quedar detrás. Para verlo siempre, usa **pantalla completa sin bordes**.
   - **Letras sincronizadas (opt-in)**: muestra la letra en tiempo real bajo el reproductor, con la línea activa resaltada. Fuente: **LRCLIB** (público, sin cuenta). Requiere internet; solo se envían título, artista, álbum y duración. El panel se colapsa solo si la pista no tiene letra sincronizada, y hay una **flecha** en la barra superior para abrirlo/cerrarlo cuando existen letras.
   - Opción de autocerrado/ocultamiento al hacer clic fuera (*Auto-hide on blur*).
   - **Volumen por aplicación** usando el mezclador de Windows (WASAPI): cada app (Tidal, Spotify, Chrome…) conserva su propio nivel. El valor se re-aplica automáticamente al cambiar de pista o hacer seek (los reproductores recrean su sesión de audio y la resetean).
@@ -60,6 +60,12 @@ En la barra superior, a la izquierda del engranaje, está el icono de **revelar 
 
 ---
 
+## 🔏 Firma de código
+
+El proyecto no incluye firma digital. Windows SmartScreen y las heurísticas de reputación puntúan mejor un ejecutable firmado, así que si distribuyes `wmo.exe` se recomienda firmarlo con un **certificado de firma de código** (estándar o EV) o con **Azure Trusted Signing**. Firmar no cambia el comportamiento de la app: solo mejora la confianza del sistema y de los antivirus.
+
+---
+
 ## 📁 Estructura del Proyecto
 
 ```
@@ -74,6 +80,7 @@ wmo/
 │   ├── main.rs         # Inicialización, IPC y bucle de eventos
 │   ├── media.rs        # Controlador WinRT GSMTC (lectura de carátulas y reproducción)
 │   ├── audio_session.rs# Volumen por aplicación vía WASAPI (mezclador de Windows)
+│   ├── volume.rs       # Volumen maestro del sistema (IAudioEndpointVolume)
 │   ├── fullscreen.rs   # Detección de fullscreen exclusivo (D3D) en primer plano
 │   ├── hotkey.rs       # Gestor Win32 RegisterHotKey en segundo plano
 │   ├── position.rs     # Algoritmo de cálculo de posiciones de pantalla

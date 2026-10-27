@@ -61,6 +61,8 @@ const chkAppVolume = document.getElementById("chkAppVolume");
 const chkDraggable = document.getElementById("chkDraggable");
 const chkRespectFullscreen = document.getElementById("chkRespectFullscreen");
 const chkLyrics = document.getElementById("chkLyrics");
+const volumeStepSelect = document.getElementById("volumeStepSelect");
+const bindError = document.getElementById("bindError");
 
 // Lyrics Elements
 const lyricsPanel = document.getElementById("lyricsPanel");
@@ -96,6 +98,16 @@ let lyricsRequestKey = "";
 let lyricsAvailable = false; // there are synced lyrics for the current track
 let lyricsCollapsed = false; // user collapsed the panel with the chevron
 const LYRICS_CACHE = new Map(); // trackKey -> lines[] | null
+const LYRICS_CACHE_LIMIT = 200;
+
+// Bounded cache: drop the oldest entry instead of growing forever
+function cacheLyrics(key, value) {
+  if (!LYRICS_CACHE.has(key) && LYRICS_CACHE.size >= LYRICS_CACHE_LIMIT) {
+    const oldest = LYRICS_CACHE.keys().next().value;
+    if (oldest !== undefined) LYRICS_CACHE.delete(oldest);
+  }
+  LYRICS_CACHE.set(key, value);
+}
 
 // Cross-fade the ambient glow: set the new art on the hidden layer, then fade layers
 function setAmbientGlow(src) {
@@ -220,25 +232,33 @@ async function readJsonCapped(res) {
 }
 
 async function fetchLyrics(state) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
   const params = new URLSearchParams({
     track_name: state.title || "",
     artist_name: state.artist || "",
     album_name: state.album || "",
     duration: String(Math.round(state.duration_sec || 0)),
   });
-  const res = await fetch(`https://lrclib.net/api/get?${params}`);
-  if (res.ok) {
-    const data = await readJsonCapped(res);
-    return data && data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
+  try {
+    const res = await fetch(`https://lrclib.net/api/get?${params}`, { signal: controller.signal });
+    if (res.ok) {
+      const data = await readJsonCapped(res);
+      return data && data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
+    }
+    // Fallback: fuzzy search
+    const q = new URLSearchParams({
+      track_name: state.title || "",
+      artist_name: state.artist || "",
+    });
+    const arr = await readJsonCapped(
+      await fetch(`https://lrclib.net/api/search?${q}`, { signal: controller.signal })
+    );
+    const hit = Array.isArray(arr) ? arr.find((r) => r && r.syncedLyrics) : null;
+    return hit ? parseLrc(hit.syncedLyrics) : null;
+  } finally {
+    clearTimeout(timeout);
   }
-  // Fallback: fuzzy search
-  const q = new URLSearchParams({
-    track_name: state.title || "",
-    artist_name: state.artist || "",
-  });
-  const arr = await readJsonCapped(await fetch(`https://lrclib.net/api/search?${q}`));
-  const hit = Array.isArray(arr) ? arr.find((r) => r && r.syncedLyrics) : null;
-  return hit ? parseLrc(hit.syncedLyrics) : null;
 }
 
 function renderLyrics(lines) {
@@ -354,7 +374,7 @@ function updateLyricsForState(state) {
   fetchLyrics(state)
     .then((lines) => {
       const good = lines && lines.length ? lines : null;
-      LYRICS_CACHE.set(key, good);
+      cacheLyrics(key, good);
       // Ignore stale responses (track changed while fetching)
       if (lyricsRequestKey !== key || lyricsTrackKey !== key) return;
       if (good) {
@@ -365,7 +385,7 @@ function updateLyricsForState(state) {
       }
     })
     .catch(() => {
-      LYRICS_CACHE.set(key, null);
+      cacheLyrics(key, null);
       if (lyricsRequestKey === key) setLyricsAvailable(false);
     });
 }
@@ -397,6 +417,7 @@ async function maxWindowHeight() {
   return (window.screen && window.screen.availHeight) || 1080;
 }
 let isOptimisticPlaying = null;
+let playOptimisticTimer = null;
 let volumeToastTimeout = null;
 
 // Helper: Format seconds to M:SS
@@ -410,21 +431,6 @@ function formatTime(secs) {
 // Clean and friendly App Name
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-}
-
-function formatSourceApp(appId) {
-  if (!appId) return "Media";
-  const lower = appId.toLowerCase();
-  if (lower.includes("spotify")) return "Spotify";
-  if (lower.includes("chrome")) return "Google Chrome";
-  if (lower.includes("msedge") || lower.includes("edge")) return "Microsoft Edge";
-  if (lower.includes("firefox")) return "Mozilla Firefox";
-  if (lower.includes("brave")) return "Brave";
-  if (lower.includes("vlc")) return "VLC Media Player";
-  if (lower.includes("apple") || lower.includes("itunes")) return "Apple Music";
-  if (lower.includes("tidal")) return "TIDAL";
-  if (lower.includes("foobar")) return "foobar2000";
-  return "Windows Media";
 }
 
 // Check and apply marquee scroll animation if text overflows container
@@ -462,7 +468,7 @@ function updateMediaUI(state) {
   if (trackArtist.textContent !== newArtist) trackArtist.textContent = newArtist;
   const newAlbum = state.album || "";
   if (trackAlbum.textContent !== newAlbum) trackAlbum.textContent = newAlbum;
-  const newBadge = formatSourceApp(state.source_app_id);
+  const newBadge = state.source_name || "Windows Media";
   if (badgeName.textContent !== newBadge) badgeName.textContent = newBadge;
 
   // Play / Pause Icon (Respect optimistic state if recently clicked)
@@ -478,6 +484,10 @@ function updateMediaUI(state) {
   // Clear optimistic override once backend catches up
   if (isOptimisticPlaying !== null && state.is_playing === isOptimisticPlaying) {
     isOptimisticPlaying = null;
+    if (playOptimisticTimer) {
+      clearTimeout(playOptimisticTimer);
+      playOptimisticTimer = null;
+    }
   }
 
   // Artwork & Ambient Glow (art arrives async via get_media_thumbnail; text never waits for it)
@@ -562,11 +572,25 @@ btnPlayPause.addEventListener("click", async () => {
     iconPause.classList.add("hidden");
   }
 
+  // Never leave the optimistic state stuck if the player ignores the toggle
+  if (playOptimisticTimer) clearTimeout(playOptimisticTimer);
+  playOptimisticTimer = setTimeout(() => {
+    playOptimisticTimer = null;
+    if (isOptimisticPlaying !== null) {
+      isOptimisticPlaying = null;
+      void refreshMediaState();
+    }
+  }, 1500);
+
   try {
     await invoke("media_play_pause");
   } catch (err) {
     console.error("PlayPause error:", err);
     isOptimisticPlaying = null; // revert on error
+    if (playOptimisticTimer) {
+      clearTimeout(playOptimisticTimer);
+      playOptimisticTimer = null;
+    }
   }
 });
 
@@ -738,12 +762,29 @@ function showVolumeToast(delta) {
   }, 900);
 }
 
-liquidCard.addEventListener("wheel", (e) => {
+function volumeStep() {
+  const step = appConfig && Number(appConfig.volume_step);
+  return Number.isFinite(step) ? Math.min(0.2, Math.max(0.01, step)) : 0.05;
+}
+
+liquidCard.addEventListener("wheel", async (e) => {
   // Ignore scrolling if inside settings drawer or source popover
   if (e.target.closest(".settings-panel") || e.target.closest(".source-popover")) return;
 
   e.preventDefault();
-  const delta = e.deltaY < 0 ? 0.04 : -0.04;
+  const step = volumeStep();
+  const delta = e.deltaY < 0 ? step : -step;
+
+  // Unmute in the backend too: otherwise the UI says "not muted" while audio stays muted
+  if (isMasterMuted) {
+    try {
+      await invoke("set_master_muted", { muted: false });
+      isMasterMuted = false;
+    } catch (err) {
+      console.error("Unmute error:", err);
+    }
+  }
+
   const newLevel = Math.max(0, Math.min(1, currentMasterVolume + delta));
   updateVolumeUI(newLevel, false);
   showVolumeToast(delta > 0 ? 1 : -1);
@@ -978,6 +1019,17 @@ function updateBindBadge() {
   bindBadge.textContent = `${modLabels.join(" + ")} + ${keyLabel}`;
 }
 
+// Shown under the bind when the backend rejects the hotkey (already registered elsewhere)
+function clearBindError() {
+  bindError.textContent = "";
+  bindError.classList.add("hidden");
+}
+
+function showBindError(message) {
+  bindError.textContent = message;
+  bindError.classList.remove("hidden");
+}
+
 modBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     btn.classList.toggle("active");
@@ -990,12 +1042,9 @@ modBtns.forEach((btn) => {
 
 keySelect.addEventListener("change", updateBindBadge);
 
-// Enable/disable dragging: custom JS drag + Tauri's native data-tauri-drag-region
+// Enable/disable dragging: the custom JS drag (start_drag) is the only mechanism
 function applyDraggable(enabled) {
   liquidCard.classList.toggle("no-drag", !enabled);
-  document.querySelectorAll("[data-tauri-drag-region]").forEach((el) => {
-    el.setAttribute("data-tauri-drag-region", enabled ? "" : "false");
-  });
 }
 
 // Hover-reveal toggle lives as a header icon, left of the settings gear
@@ -1033,6 +1082,16 @@ async function loadConfigUI() {
     keySelect.value = appConfig.hotkey_key || "Space";
     updateBindBadge();
 
+    // Wheel volume step: snap legacy/odd values to the closest preset
+    const step = Number(appConfig.volume_step);
+    const steps = [0.01, 0.02, 0.05, 0.1];
+    const closest = steps.reduce(
+      (best, s) => (Math.abs(s - step) < Math.abs(best - step) ? s : best),
+      steps[0]
+    );
+    volumeStepSelect.value = String(closest);
+    clearBindError();
+
     // Toggles
     chkAutoHide.checked = !!appConfig.auto_hide_on_blur;
     chkAmbientGlow.checked = appConfig.ambient_glow !== false;
@@ -1062,7 +1121,7 @@ btnSaveConfig.addEventListener("click", async () => {
     custom_y: appConfig ? appConfig.custom_y : 100,
     auto_hide_on_blur: chkAutoHide.checked,
     ambient_glow: chkAmbientGlow.checked,
-    volume_step: appConfig && Number.isFinite(appConfig.volume_step) ? appConfig.volume_step : 0.05,
+    volume_step: Number(volumeStepSelect.value) || 0.05,
     hover_reveal: !!(appConfig && appConfig.hover_reveal),
     app_volume: chkAppVolume.checked,
     draggable: chkDraggable.checked,
@@ -1074,6 +1133,7 @@ btnSaveConfig.addEventListener("click", async () => {
     await invoke("update_app_config", { newConfig });
     appConfig = newConfig;
     configDirty = false;
+    clearBindError();
     applyDraggable(chkDraggable.checked);
     // Ambient glow toggle takes effect immediately
     if (chkAmbientGlow.checked) {
@@ -1100,6 +1160,10 @@ btnSaveConfig.addEventListener("click", async () => {
     }, 900);
   } catch (err) {
     console.error("Save config error:", err);
+    // The backend rejected the change (usually the hotkey is taken): keep the saved bind
+    await loadConfigUI();
+    applyDraggable(chkDraggable.checked);
+    showBindError(String(err));
   }
 });
 
@@ -1124,13 +1188,12 @@ document.addEventListener("mousedown", (e) => {
   if (appConfig && appConfig.draggable === false) return;
 
   // Never initiate drag if interacting with buttons, inputs, sliders, popovers, etc.
-  if (e.target.closest("button, input, select, .scrubber, .vol-bar, .source-item, .pos-option, .mod-btn, .checkbox-label, .source-popover")) {
+  if (e.target.closest("button, input, select, .scrubber, .vol-bar, .source-item, .mod-btn, .source-popover, .lyrics-scroll")) {
     return;
   }
 
   // Allow dragging on header, metadata wrapper, background card, island
   if (
-    e.target.closest("[data-tauri-drag-region]") ||
     e.target.closest(".card-header") ||
     e.target.closest(".metadata-wrapper") ||
     e.target.closest(".island-indicator") ||
@@ -1221,7 +1284,7 @@ async function init() {
   }
 
   // Safety: if the pointer enters the window, it must be interactive (covers focus-steal cases)
-  document.addEventListener("mouseenter", () => liquidCard.classList.remove("island-out"));
+  document.documentElement.addEventListener("mouseenter", () => liquidCard.classList.remove("island-out"));
 }
 
 window.addEventListener("DOMContentLoaded", init);

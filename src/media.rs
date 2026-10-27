@@ -18,6 +18,7 @@ use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 pub struct MediaState {
     pub has_session: bool,
     pub source_app_id: String,
+    pub source_name: String,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -35,6 +36,7 @@ impl Default for MediaState {
         Self {
             has_session: false,
             source_app_id: String::new(),
+            source_name: "Windows Media".to_string(),
             title: "Sin reproducción".to_string(),
             artist: "Inicia tu reproductor de música".to_string(),
             album: String::new(),
@@ -60,13 +62,15 @@ pub struct AudioSourceItem {
 }
 
 // Global cache: (Track Title, Track Artist, Source App ID, Cached Base64)
-static THUMBNAIL_CACHE: Mutex<Option<(String, String, String, Option<String>)>> = Mutex::new(None);
+type ThumbnailCache = Mutex<Option<(String, String, String, Option<String>)>>;
+static THUMBNAIL_CACHE: ThumbnailCache = Mutex::new(None);
 // Selected source app ID (if manually selected by user)
 static SELECTED_SOURCE_ID: Mutex<Option<String>> = Mutex::new(None);
 // Exact AUMID of the session we are currently showing (auto mode).
 // Exact (not app-level) because one browser exposes several sessions with different AUMIDs.
 // Only `stabilize` commits it, so a transient pick can never latch.
-static SHOWN_STATE: Mutex<Option<(String, MediaState, Option<(String, Instant)>)>> = Mutex::new(None);
+type ShownState = Mutex<Option<(String, MediaState, Option<(String, Instant)>)>>;
+static SHOWN_STATE: ShownState = Mutex::new(None);
 
 const SESSION_SWITCH_HOLD: Duration = Duration::from_millis(1500);
 
@@ -109,9 +113,22 @@ fn stabilize(state: MediaState) -> MediaState {
     }
 }
 
+// Thumbnail format must match the real bytes: wrong MIME makes WebView2 reject the image
+fn image_mime(data: &[u8]) -> &'static str {
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png"
+    } else if data.starts_with(&[0xFF, 0xD8]) {
+        "image/jpeg"
+    } else if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    }
+}
+
 fn to_base64(data: &[u8]) -> String {
     const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as usize;
         let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
@@ -142,6 +159,11 @@ thread_local! {
 }
 
 impl MediaController {
+    // Drop the cached manager so the next call recreates it (shell restarts, RPC errors)
+    fn invalidate_manager() {
+        MANAGER.with(|cell| *cell.borrow_mut() = None);
+    }
+
     fn get_manager() -> Option<GlobalSystemMediaTransportControlsSessionManager> {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -183,36 +205,40 @@ impl MediaController {
         // If user manually chose a source, try finding that session
         if let Ok(guard) = SELECTED_SOURCE_ID.lock() {
             if let Some(target) = guard.as_ref() {
-                if let Ok(sessions) = manager.GetSessions() {
-                    // ponytail: exact id; ##idx tiebreaker only among same-app dupes; else first playing of that app
-                    let all: Vec<_> = sessions.into_iter().collect();
-                    let mut counts: HashMap<String, usize> = HashMap::new();
-                    for s in &all {
-                        let r = s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
-                        *counts.entry(r).or_insert(0) += 1;
-                    }
-                    for (idx, session) in all.iter().enumerate() {
-                        let raw = session.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
-                        let tid = Self::tie_id(&raw, idx, counts.get(&raw).copied().unwrap_or(0) > 1);
-                        if &tid == target {
-                            return Some(session.clone());
+                match manager.GetSessions() {
+                    Ok(sessions) => {
+                        // ponytail: exact id; ##idx tiebreaker only among same-app dupes; else first playing of that app
+                        let all: Vec<_> = sessions.into_iter().collect();
+                        let mut counts: HashMap<String, usize> = HashMap::new();
+                        for s in &all {
+                            let r = s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
+                            *counts.entry(r).or_insert(0) += 1;
                         }
-                    }
-                    // Base id (no ## tie): if several same-app sessions, prefer the one actually playing
-                    let base = target.split("##").next().unwrap_or(target);
-                    if counts.get(base).copied().unwrap_or(0) > 1 {
+                        for (idx, session) in all.iter().enumerate() {
+                            let raw = session.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
+                            let tid = Self::tie_id(&raw, idx, counts.get(&raw).copied().unwrap_or(0) > 1);
+                            if &tid == target {
+                                return Some(session.clone());
+                            }
+                        }
+                        // Base id (no ## tie): if several same-app sessions, prefer the one actually playing
+                        let base = target.split("##").next().unwrap_or(target);
+                        if counts.get(base).copied().unwrap_or(0) > 1 {
+                            if let Some(s) = all.iter().find(|s| {
+                                s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default() == base
+                                    && Self::session_is_playing(s)
+                            }) {
+                                return Some(s.clone());
+                            }
+                        }
                         if let Some(s) = all.iter().find(|s| {
                             s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default() == base
-                                && Self::session_is_playing(s)
                         }) {
                             return Some(s.clone());
                         }
                     }
-                    if let Some(s) = all.iter().find(|s| {
-                        s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default() == base
-                    }) {
-                        return Some(s.clone());
-                    }
+                    // A broken manager would keep failing forever: recreate it on the next call
+                    Err(_) => Self::invalidate_manager(),
                 }
             }
         }
@@ -220,25 +246,28 @@ impl MediaController {
         // Auto mode. Keep the exact session we're showing (a browser exposes several sessions
         // with different AUMIDs, e.g. Brave vs Brave._crx_...); only switch when it's gone.
         // Transient flashes are absorbed later by `stabilize`'s debounce.
-        if let Ok(sessions) = manager.GetSessions() {
-            let all: Vec<_> = sessions.into_iter().collect();
-            let aumid_of = |s: &GlobalSystemMediaTransportControlsSession| {
-                s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
-            };
+        match manager.GetSessions() {
+            Ok(sessions) => {
+                let all: Vec<_> = sessions.into_iter().collect();
+                let aumid_of = |s: &GlobalSystemMediaTransportControlsSession| {
+                    s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
+                };
 
-            // 1. Exact session we were showing, if it still exists
-            if let Some(shown) = shown_aumid() {
-                if let Some(s) = all.iter().find(|s| aumid_of(s) == shown) {
+                // 1. Exact session we were showing, if it still exists
+                if let Some(shown) = shown_aumid() {
+                    if let Some(s) = all.iter().find(|s| aumid_of(s) == shown) {
+                        return Some(s.clone());
+                    }
+                }
+                // 2. Otherwise a playing session, else the first available
+                if let Some(s) = all.iter().find(|s| Self::session_is_playing(s)) {
+                    return Some(s.clone());
+                }
+                if let Some(s) = all.first() {
                     return Some(s.clone());
                 }
             }
-            // 2. Otherwise a playing session, else the first available
-            if let Some(s) = all.iter().find(|s| Self::session_is_playing(s)) {
-                return Some(s.clone());
-            }
-            if let Some(s) = all.first() {
-                return Some(s.clone());
-            }
+            Err(_) => Self::invalidate_manager(),
         }
 
         // Default fallback to system's current session
@@ -310,10 +339,14 @@ impl MediaController {
                 let is_playing = Self::session_is_playing(session);
 
                 let session_unique_id = Self::tie_id(&raw_id, idx, counts.get(&raw_id).copied().unwrap_or(0) > 1);
+                // Auto mode must mark the session we actually show, not Windows' current one
                 let is_current = if let Some(ref sel) = selected_id {
                     sel == &session_unique_id || sel == &raw_id
                 } else {
-                    raw_id == current_app_id
+                    match shown_aumid() {
+                        Some(shown) => raw_id == shown,
+                        None => raw_id == current_app_id,
+                    }
                 };
 
                 let display_name = Self::clean_app_name(&raw_id);
@@ -327,9 +360,11 @@ impl MediaController {
                     is_playing,
                 });
             }
+        } else {
+            Self::invalidate_manager();
         }
         // Playing sessions first so the live source is easy to pick
-        list.sort_by(|a, b| b.is_playing.cmp(&a.is_playing));
+        list.sort_by_key(|a| std::cmp::Reverse(a.is_playing));
         list
     }
 
@@ -345,12 +380,18 @@ impl MediaController {
     }
 
     fn clean_app_name(app_id: &str) -> String {
+        if app_id.is_empty() {
+            return "Windows Media".to_string();
+        }
         let lower = app_id.to_lowercase();
-        if lower.contains("spotify") {
+        // Firefox reports an opaque hash as AUMID, not its name
+        if lower.contains("308046b0af4a39cb") {
+            "Mozilla Firefox".to_string()
+        } else if lower.contains("spotify") {
             "Spotify".to_string()
         } else if lower.contains("chrome") {
             "Google Chrome".to_string()
-        } else if lower.contains("msedge") || lower.contains("edge") {
+        } else if lower.contains("msedge") || lower.starts_with("msedge") {
             "Microsoft Edge".to_string()
         } else if lower.contains("firefox") {
             "Mozilla Firefox".to_string()
@@ -366,7 +407,7 @@ impl MediaController {
             "foobar2000".to_string()
         } else {
             // Strip .exe or path if present
-            let name = app_id.split('\\').last().unwrap_or(app_id);
+            let name = app_id.split('\\').next_back().unwrap_or(app_id);
             let name = name.strip_suffix(".exe").unwrap_or(name);
             name.to_string()
         }
@@ -472,9 +513,11 @@ impl MediaController {
             }
         }
 
+        let source_name = Self::clean_app_name(&app_id);
         let state = MediaState {
             has_session: true,
             source_app_id: app_id,
+            source_name,
             title,
             artist,
             album,
@@ -523,7 +566,11 @@ impl MediaController {
                                                     if load_op.get().is_ok() {
                                                         let mut buf = vec![0u8; size as usize];
                                                         if reader.ReadBytes(&mut buf).is_ok() {
-                                                            fetched = Some(format!("data:image/jpeg;base64,{}", to_base64(&buf)));
+                                                            fetched = Some(format!(
+                                                                "data:{};base64,{}",
+                                                                image_mime(&buf),
+                                                                to_base64(&buf)
+                                                            ));
                                                         }
                                                     }
                                                 }

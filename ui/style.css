@@ -97,7 +97,6 @@ html, body {
   justify-content: space-between;
   padding: 8px 14px 4px 14px;
   cursor: grab;
-  -webkit-app-region: drag;
 }
 
 .card-header:active {
@@ -111,18 +110,6 @@ html, body {
   cursor: default;
 }
 
-.liquid-card.no-drag [data-tauri-drag-region],
-.liquid-card.no-drag .metadata-wrapper,
-.liquid-card.no-drag .island-indicator {
-  -webkit-app-region: no-drag;
-}
-
-[data-tauri-drag-region],
-.metadata-wrapper,
-.island-indicator {
-  -webkit-app-region: drag;
-}
-
 button,
 input,
 select,
@@ -131,9 +118,7 @@ select,
 .source-item,
 .source-popover,
 .settings-panel,
-.pos-option,
-.mod-btn,
-.checkbox-label {
+.mod-btn {
   -webkit-app-region: no-drag;
 }
 
@@ -1003,54 +988,19 @@ select,
   margin-top: 2px;
 }
 
+/* Rejected hotkey (already registered by another app) */
+.bind-error {
+  font-size: 11px;
+  color: #FF453A;
+  margin-top: 2px;
+}
+
 .bind-badge {
   color: var(--accent-color);
   font-weight: 600;
   background: rgba(var(--accent-rgb), 0.15);
   padding: 2px 7px;
   border-radius: 8px;
-}
-
-/* Position Grid */
-.position-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-
-.pos-option {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 8px 10px;
-  border-radius: 12px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: inherit;
-}
-
-.pos-option:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.pos-option.active {
-  background: rgba(var(--accent-rgb), 0.18);
-  border-color: var(--accent-color);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.25);
-}
-
-.pos-icon {
-  font-size: 14px;
-}
-
-.pos-name {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-primary);
 }
 
 /* Toggles */
@@ -1106,7 +1056,6 @@ select,
 
 /* Accent-driven elements animate when the album art changes the accent color */
 .pill-btn.active,
-.pos-option.active,
 .source-item.active,
 .source-item-badge,
 .save-btn,

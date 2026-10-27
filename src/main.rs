@@ -12,9 +12,11 @@ mod volume;
 use config::{load_config, save_config, AppConfig};
 use hotkey::HotkeyManager;
 use media::{MediaController, MediaState};
-use position::apply_window_position;
+use position::{apply_top_center_on_monitor, apply_window_position};
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,13 +24,18 @@ use tauri::{Emitter, LogicalSize, Manager, Size, WebviewWindow, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP};
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, ShowWindow, SW_SHOWNOACTIVATE};
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub hotkey_mgr: Mutex<Option<Arc<HotkeyManager>>>,
     pub last_shown: Mutex<Instant>,
+    // Set by the fullscreen watcher so config changes can't re-assert topmost over a game
+    pub fullscreen_active: AtomicBool,
 }
 
 // Per-app desired volume/mute (in-memory): lets us re-apply after a player recreates its audio session
@@ -77,16 +84,6 @@ async fn media_previous() -> Result<bool, String> {
 #[tauri::command]
 async fn media_seek(seconds: f64) -> Result<bool, String> {
     MediaController::seek_to(seconds)
-}
-
-#[tauri::command]
-fn adjust_volume(delta: i32) -> Result<(), String> {
-    let vk = if delta > 0 { 0xAFu8 } else { 0xAEu8 }; // VK_VOLUME_UP = 0xAF, VK_VOLUME_DOWN = 0xAE
-    unsafe {
-        keybd_event(vk, 0, KEYBD_EVENT_FLAGS(0), 0);
-        keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -221,12 +218,12 @@ fn update_app_config(
     state: tauri::State<'_, AppState>,
     window: WebviewWindow,
 ) -> Result<(), String> {
-    save_config(&new_config)?;
-
-    // Update hotkey
+    // Register the hotkey first: if another app owns it, nothing is persisted and the UI can revert
     if let Some(mgr) = state.hotkey_mgr.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        mgr.update_hotkey(new_config.hotkey_modifiers.clone(), new_config.hotkey_key.clone());
+        mgr.update_hotkey(new_config.hotkey_modifiers.clone(), new_config.hotkey_key.clone())?;
     }
+
+    save_config(&new_config)?;
 
     // Apply new position
     let _ = apply_window_position(
@@ -236,8 +233,9 @@ fn update_app_config(
         new_config.custom_y,
     );
 
-    // Topmost is managed by the fullscreen watcher; re-assert it on config change
-    let _ = window.set_always_on_top(true);
+    // Topmost is managed by the fullscreen watcher; re-assert it unless a game is fullscreen
+    let fullscreen = state.fullscreen_active.load(Ordering::Relaxed);
+    let _ = window.set_always_on_top(!fullscreen);
 
     *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config;
     Ok(())
@@ -277,19 +275,91 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         let state = app.state::<AppState>();
         *state.last_shown.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
         let conf = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let fullscreen = state.fullscreen_active.load(Ordering::Relaxed);
+        // Activating the overlay over an exclusive-fullscreen game minimizes it
+        let no_activate = conf.respect_fullscreen && fullscreen;
+
         let _ = apply_window_position(&win, &conf.position_preset, conf.custom_x, conf.custom_y);
-        let _ = win.show();
-        let _ = win.unminimize();
-        let _ = win.set_focus();
+        if no_activate {
+            // Show without stealing focus and without topmost (Windows won't draw it over D3D)
+            let _ = win.set_always_on_top(false);
+            if let Ok(hwnd) = win.hwnd() {
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                }
+            }
+        } else {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        }
         // Ensure the card isn't left in the island "out" state after being shown again
         let _ = app.emit("island-visibility", true);
+    }
+}
+
+fn logs_dir() -> PathBuf {
+    let base = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let dir = base.join("WMO").join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+// Logs live in %APPDATA%\WMO\logs, never in the CWD (which can be System32 at autostart)
+fn write_panic_log(msg: &str) {
+    use std::io::Write;
+
+    let path = logs_dir().join("panic.log");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let entry = format!("--- panic at {} ---\n{}\n", stamp, msg);
+
+    // Cap the file at ~256 KB so it can't grow forever
+    let too_big = std::fs::metadata(&path)
+        .map(|m| m.len() > 262_144)
+        .unwrap_or(false);
+    let result = if too_big {
+        std::fs::write(&path, &entry)
+    } else {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut f| f.write_all(entry.as_bytes()))
+    };
+    let _ = result;
+}
+
+// Monitor under the cursor (physical rect) plus its effective DPI scale
+fn monitor_at_cursor(cursor: POINT) -> Option<(MONITORINFO, f64)> {
+    unsafe {
+        let hmon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        if hmon.0.is_null() {
+            return None;
+        }
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if !GetMonitorInfoW(hmon, &mut info).as_bool() {
+            return None;
+        }
+        let mut dpi_x = 96u32;
+        let mut dpi_y = 96u32;
+        let _ = GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+        let scale = if dpi_x > 0 { dpi_x as f64 / 96.0 } else { 1.0 };
+        Some((info, scale))
     }
 }
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("PANIC: {}\nLocation: {:?}\nBacktrace: {:?}", info, info.location(), std::backtrace::Backtrace::capture());
-        let _ = std::fs::write("panic.log", &msg);
+        write_panic_log(&msg);
         eprintln!("{}", msg);
     }));
 
@@ -299,6 +369,7 @@ fn main() {
         config: Mutex::new(initial_config.clone()),
         hotkey_mgr: Mutex::new(None),
         last_shown: Mutex::new(Instant::now()),
+        fullscreen_active: AtomicBool::new(false),
     };
 
     tauri::Builder::default()
@@ -310,7 +381,6 @@ fn main() {
             media_next,
             media_previous,
             media_seek,
-            adjust_volume,
             get_audio_sources,
             select_audio_source,
             get_master_volume,
@@ -436,26 +506,16 @@ fn main() {
                 let mut pending_hide: Option<Instant> = None;
                 let mut fullscreen_prev = false;
                 // Cursor touching the exact top edge of a monitor, within the island's width
-                let in_reveal_zone = |win: &WebviewWindow, cursor: POINT| -> bool {
-                    let mon = win
-                        .current_monitor()
-                        .ok()
-                        .flatten()
-                        .or_else(|| win.primary_monitor().ok().flatten());
-                    let Some(mon) = mon else {
-                        return false;
-                    };
-                    let sf = mon.scale_factor();
-                    let mp = mon.position();
-                    let ms = mon.size();
-                    let cx = mp.x + ms.width as i32 / 2;
-                    let zone_w = (380.0 * sf) as i32;
+                let in_reveal_zone = |mon: &MONITORINFO, scale: f64, cursor: POINT| -> bool {
+                    let rect = mon.rcMonitor;
+                    let cx = rect.left + (rect.right - rect.left) / 2;
+                    let zone_w = (380.0 * scale) as i32;
                     // Only the exact edge (2px), where the cursor stops when pushed to the limit
-                    let edge = (2.0 * sf).max(1.0) as i32;
+                    let edge = (2.0 * scale).max(1.0) as i32;
                     cursor.x >= cx - zone_w / 2
                         && cursor.x <= cx + zone_w / 2
-                        && cursor.y >= mp.y
-                        && cursor.y <= mp.y + edge
+                        && cursor.y >= rect.top
+                        && cursor.y <= rect.top + edge
                 };
                 loop {
                     let (hover_enabled, respect_fullscreen) = {
@@ -468,6 +528,11 @@ fn main() {
                     };
                     let fullscreen_active =
                         respect_fullscreen && fullscreen::exclusive_fullscreen_active();
+                    // Share the state with update_app_config / the hotkey (other threads)
+                    app_handle_hover
+                        .state::<AppState>()
+                        .fullscreen_active
+                        .store(fullscreen_active, Ordering::Relaxed);
 
                     if let Some(win) = app_handle_hover.get_webview_window("main") {
                         // Only drop "always on top" while a fullscreen app is in front, so the
@@ -482,14 +547,32 @@ fn main() {
                         if hover_enabled && !fullscreen_active {
                             let mut cursor = POINT::default();
                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                                // Follow the cursor: with several monitors the window may be elsewhere
+                                let mon = monitor_at_cursor(cursor);
+                                let in_zone = |c: POINT| match &mon {
+                                    Some((info, scale)) => in_reveal_zone(info, *scale, c),
+                                    None => false,
+                                };
                                 let visible = win.is_visible().unwrap_or(false);
                                 if !visible {
-                                    if in_reveal_zone(&win, cursor) {
-                                        let _ = apply_window_position(&win, "top-center", 0, 0);
-                                        let _ = win.show();
-                                        let _ = app_handle_hover.emit("island-visibility", true);
-                                        outside_since = None;
-                                        pending_hide = None;
+                                    if let Some((info, scale)) = &mon {
+                                        if in_reveal_zone(info, *scale, cursor) {
+                                            let rect = info.rcMonitor;
+                                            let _ = apply_top_center_on_monitor(
+                                                &win,
+                                                (
+                                                    rect.left,
+                                                    rect.top,
+                                                    rect.right - rect.left,
+                                                    rect.bottom - rect.top,
+                                                ),
+                                                *scale,
+                                            );
+                                            let _ = win.show();
+                                            let _ = app_handle_hover.emit("island-visibility", true);
+                                            outside_since = None;
+                                            pending_hide = None;
+                                        }
                                     }
                                 } else if let Some(t) = pending_hide {
                                     // Animating out: finish hiding once the CSS transition has run
@@ -499,7 +582,7 @@ fn main() {
                                     }
                                     // Re-enter (window box or the top edge) cancels the hide
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
-                                    let inside = in_reveal_zone(&win, cursor)
+                                    let inside = in_zone(cursor)
                                         || match (win.outer_position(), win.outer_size()) {
                                             (Ok(pos), Ok(size)) => {
                                                 cursor.x >= pos.x - margin
@@ -516,7 +599,7 @@ fn main() {
                                     }
                                 } else if !win.is_focused().unwrap_or(false) {
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
-                                    let inside = in_reveal_zone(&win, cursor)
+                                    let inside = in_zone(cursor)
                                         || match (win.outer_position(), win.outer_size()) {
                                             (Ok(pos), Ok(size)) => {
                                                 cursor.x >= pos.x - margin

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -38,6 +39,16 @@ fn d_preset() -> String { "top-center".to_string() }
 fn d_custom() -> i32 { 100 }
 fn d_true() -> bool { true }
 fn d_step() -> f64 { 0.05 }
+
+impl AppConfig {
+    // Clamp values from old or hand-edited configs so nothing downstream gets garbage
+    fn normalize(&mut self) {
+        if !self.volume_step.is_finite() {
+            self.volume_step = d_step();
+        }
+        self.volume_step = self.volume_step.clamp(0.01, 0.2);
+    }
+}
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -79,26 +90,48 @@ pub fn get_config_path() -> PathBuf {
     }
 }
 
+// Never overwrite a config we failed to parse: keep it aside so the user can recover it
+fn backup_corrupt_config(path: &PathBuf) {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut backup = path.clone().into_os_string();
+    backup.push(format!(".bak-{}", stamp));
+    let _ = fs::rename(path, PathBuf::from(backup));
+}
+
 pub fn load_config() -> AppConfig {
     let path = get_config_path();
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
-                // Position presets were removed: the app is always the Dynamic Island (top-center).
-                let mut changed = false;
-                if config.position_preset != "top-center" {
-                    // Legacy "custom" only came from the old drag logic, which broke hover-hide.
-                    // Restore the island behavior when migrating away from it.
-                    if config.position_preset == "custom" {
-                        config.hover_reveal = true;
+            match serde_json::from_str::<AppConfig>(&content) {
+                Ok(mut config) => {
+                    // Position presets were removed: the app is always the Dynamic Island (top-center).
+                    let mut changed = false;
+                    if config.position_preset != "top-center" {
+                        // Legacy "custom" only came from the old drag logic, which broke hover-hide.
+                        // Restore the island behavior when migrating away from it.
+                        if config.position_preset == "custom" {
+                            config.hover_reveal = true;
+                        }
+                        config.position_preset = "top-center".to_string();
+                        changed = true;
                     }
-                    config.position_preset = "top-center".to_string();
-                    changed = true;
+                    let before = config.volume_step;
+                    config.normalize();
+                    if config.volume_step != before {
+                        changed = true;
+                    }
+                    if changed {
+                        let _ = save_config(&config);
+                    }
+                    return config;
                 }
-                if changed {
-                    let _ = save_config(&config);
+                Err(_) => {
+                    // Broken JSON: keep a copy instead of silently replacing user settings
+                    backup_corrupt_config(&path);
                 }
-                return config;
             }
         }
     }

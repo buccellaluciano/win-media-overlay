@@ -1,5 +1,21 @@
 use tauri::{PhysicalPosition, Position, WebviewWindow};
 
+// Top-center of a physical monitor rect. Used by hover-reveal, where the cursor may be
+// on a different monitor than the (hidden) window.
+pub fn apply_top_center_on_monitor(
+    window: &WebviewWindow,
+    rect: (i32, i32, i32, i32), // physical: x, y, width, height
+    scale: f64,
+) -> Result<(), String> {
+    let (mon_x, mon_y, mon_width, _mon_height) = rect;
+    let base_width = (480.0 * scale) as i32;
+    let x = mon_x + (mon_width - base_width) / 2;
+    let y = mon_y + (28.0 * scale) as i32;
+    window
+        .set_position(Position::Physical(PhysicalPosition { x, y }))
+        .map_err(|e| e.to_string())
+}
+
 pub fn apply_window_position(
     window: &WebviewWindow,
     preset: &str,
@@ -46,9 +62,11 @@ pub fn apply_window_position(
 
         let (x, y) = match preset {
             "top-center" => {
-                let x = mon_pos.x + (mon_width - base_width) / 2;
-                let y = mon_pos.y + (28.0 * scale) as i32;
-                (x, y)
+                return apply_top_center_on_monitor(
+                    window,
+                    (mon_pos.x, mon_pos.y, mon_width, mon_height),
+                    scale,
+                );
             }
             "bottom-right" => {
                 let x = mon_pos.x + mon_width - base_width - (24.0 * scale) as i32;
