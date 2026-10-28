@@ -127,7 +127,7 @@ fn stabilize(state: MediaState) -> MediaState {
 }
 
 // Thumbnail format must match the real bytes: wrong MIME makes WebView2 reject the image
-fn image_mime(data: &[u8]) -> &'static str {
+pub(crate) fn image_mime(data: &[u8]) -> &'static str {
     if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
         "image/png"
     } else if data.starts_with(&[0xFF, 0xD8]) {
@@ -139,7 +139,7 @@ fn image_mime(data: &[u8]) -> &'static str {
     }
 }
 
-fn to_base64(data: &[u8]) -> String {
+pub(crate) fn to_base64(data: &[u8]) -> String {
     const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {

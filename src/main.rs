@@ -1,11 +1,13 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_icon;
 mod audio_session;
 mod config;
 mod fullscreen;
 mod hotkey;
 mod media;
+mod notifications;
 mod position;
 mod sysstats;
 mod volume;
@@ -270,11 +272,14 @@ fn get_app_config(state: tauri::State<'_, AppState>) -> AppConfig {
 
 #[tauri::command]
 fn update_app_config(
-    new_config: AppConfig,
+    mut new_config: AppConfig,
     state: tauri::State<'_, AppState>,
     window: WebviewWindow,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    // Same clamps as a config loaded from disk (the UI is not trusted to send sane values)
+    new_config.normalize();
+
     // Register the hotkey first: if another app owns it, nothing is persisted and the UI can revert
     if let Some(mgr) = state.hotkey_mgr.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         mgr.update_hotkey(new_config.hotkey_modifiers.clone(), new_config.hotkey_key.clone())?;
@@ -298,6 +303,9 @@ fn update_app_config(
 
     *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config.clone();
     sysstats::wake();
+    notifications::wake();
+    // The toast window follows the theme/opacity of the main one
+    let _ = app.emit_to(notifications::NOTIFY_LABEL, "config-changed", &new_config);
 
     // Switching the island on/off takes effect now, not on the next hover tick
     if new_config.island_enabled != island_was_enabled {
@@ -683,6 +691,9 @@ fn main() {
             set_hit_rect,
             hide_window,
             toggle_window,
+            notifications::notify_layout,
+            notifications::notify_access,
+            notifications::notify_test,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
@@ -755,6 +766,12 @@ fn main() {
 
             // System stats sampler (sleeps while disabled or hidden)
             sysstats::spawn(app.handle().clone());
+
+            // Windows notifications -> quiet toasts (opt-in; the thread sleeps while disabled)
+            if let Some(notify) = app.get_webview_window(notifications::NOTIFY_LABEL) {
+                notifications::setup_window(&notify);
+            }
+            notifications::spawn(app.handle().clone());
 
             // Background media polling loop
             let app_handle_polling = app.handle().clone();

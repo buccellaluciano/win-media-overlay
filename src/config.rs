@@ -55,6 +55,14 @@ pub struct AppConfig {
     pub accent_from_art: bool,
     #[serde(default = "d_opacity")]
     pub card_opacity: f32,
+    #[serde(default)]
+    pub notif_enabled: bool, // opt-in: mirror Windows notifications as quiet WMO toasts
+    #[serde(default = "d_true")]
+    pub notif_show_body: bool, // false: only app + title (privacy)
+    #[serde(default = "d_notif_ms")]
+    pub notif_duration_ms: u32,
+    #[serde(default)]
+    pub notif_ignore: Vec<String>, // app names (substring, case-insensitive) never shown
 }
 
 pub const STAT_ITEMS: [&str; 7] = ["cpu", "gpu", "ram", "vram", "net", "disk", "gpu_temp"];
@@ -83,10 +91,11 @@ fn d_stats_items() -> Vec<String> {
 }
 fn d_theme() -> String { "liquid".to_string() }
 fn d_opacity() -> f32 { 0.74 }
+fn d_notif_ms() -> u32 { 6000 }
 
 impl AppConfig {
     // Clamp values from old or hand-edited configs so nothing downstream gets garbage
-    fn normalize(&mut self) {
+    pub(crate) fn normalize(&mut self) {
         if !self.volume_step.is_finite() {
             self.volume_step = d_step();
         }
@@ -107,6 +116,15 @@ impl AppConfig {
             self.card_opacity = d_opacity();
         }
         self.card_opacity = self.card_opacity.clamp(0.4, 1.0);
+        self.notif_duration_ms = self.notif_duration_ms.clamp(3000, 15000);
+        let mut ignore: Vec<String> = Vec::new();
+        for app in &self.notif_ignore {
+            let app = app.trim().to_string();
+            if !app.is_empty() && !ignore.contains(&app) && ignore.len() < 30 {
+                ignore.push(app);
+            }
+        }
+        self.notif_ignore = ignore;
     }
 }
 
@@ -138,6 +156,10 @@ impl Default for AppConfig {
             theme: d_theme(),
             accent_from_art: true,
             card_opacity: d_opacity(),
+            notif_enabled: false,
+            notif_show_body: true,
+            notif_duration_ms: d_notif_ms(),
+            notif_ignore: Vec::new(),
         }
     }
 }

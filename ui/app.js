@@ -80,6 +80,12 @@ const chkStatDisk = document.getElementById("chkStatDisk");
 const chkStatGpuTemp = document.getElementById("chkStatGpuTemp");
 const chkStatsInIsland = document.getElementById("chkStatsInIsland");
 const chkStatsAlerts = document.getElementById("chkStatsAlerts");
+const chkNotifEnabled = document.getElementById("chkNotifEnabled");
+const chkNotifShowBody = document.getElementById("chkNotifShowBody");
+const notifDurationSelect = document.getElementById("notifDurationSelect");
+const notifIgnoreInput = document.getElementById("notifIgnoreInput");
+const notifAccess = document.getElementById("notifAccess");
+const btnNotifTest = document.getElementById("btnNotifTest");
 
 // Appearance elements
 const themeGrid = document.getElementById("themeGrid");
@@ -1680,7 +1686,7 @@ keySelect.addEventListener("change", updateBindBadge);
 
 const settingsTabs = document.getElementById("settingsTabs");
 const settingsHint = document.getElementById("settingsHint");
-const SETTINGS_TAB_ORDER = ["general", "island", "look", "system"];
+const SETTINGS_TAB_ORDER = ["general", "island", "look", "system", "notify"];
 let settingsTab = "general";
 
 // Slide the pill under the active tab (measured, so labels can have any width)
@@ -1708,6 +1714,7 @@ function showSettingsTab(tab) {
   });
   settingsPanel.querySelector(".settings-pages").scrollTop = 0;
   updateSettingsTabIndicator();
+  if (tab === "notify") void refreshNotifAccess();
 }
 
 settingsTabs.querySelectorAll(".settings-tab").forEach((btn) => {
@@ -1741,15 +1748,50 @@ function makeSegmented(el) {
   paint();
 }
 
-[volumeStepSelect, expandDelaySelect, statsIntervalSelect].forEach(makeSegmented);
+[volumeStepSelect, expandDelaySelect, statsIntervalSelect, notifDurationSelect].forEach(makeSegmented);
+
+// "Teams, Outlook ,, teams" -> ["Teams", "Outlook"]
+function parseIgnoreList(text) {
+  const out = [];
+  for (const part of String(text || "").split(",")) {
+    const name = part.trim();
+    if (name && !out.some((x) => x.toLowerCase() === name.toLowerCase())) out.push(name);
+  }
+  return out.slice(0, 30);
+}
+
+const NOTIF_ACCESS_TEXT = {
+  allowed: "Acceso permitido · copia silenciosa arriba a la derecha",
+  denied: "Sin acceso: actívalo en Configuración › Privacidad › Notificaciones",
+  unavailable: "Este Windows no permite leer las notificaciones",
+  unspecified: "Copia silenciosa arriba a la derecha, sin sonido ni foco",
+};
+
+// The poller only learns the permission while the feature is on
+async function refreshNotifAccess() {
+  try {
+    const status = await invoke("notify_access");
+    notifAccess.textContent = NOTIF_ACCESS_TEXT[status] || NOTIF_ACCESS_TEXT.unspecified;
+    notifAccess.classList.toggle("warn", status === "denied" || status === "unavailable");
+  } catch {
+    notifAccess.textContent = NOTIF_ACCESS_TEXT.unspecified;
+  }
+}
+
+btnNotifTest.addEventListener("click", (e) => {
+  e.preventDefault();
+  invoke("notify_test").catch((err) => console.error("Notify test error:", err));
+});
 
 // Rows that only matter when a master switch is on (or off) fade out and lock
 function updateSettingsDependencies() {
   const island = chkIslandEnabled.checked;
   const stats = chkStatsEnabled.checked;
+  const notify = chkNotifEnabled.checked;
   settingsPanel.querySelectorAll("[data-dep]").forEach((row) => {
     const dep = row.dataset.dep;
-    const enabled = dep === "island" ? island : dep === "no-island" ? !island : stats;
+    const enabled =
+      dep === "island" ? island : dep === "no-island" ? !island : dep === "notify" ? notify : stats;
     row.classList.toggle("disabled", !enabled);
     row.querySelectorAll("input, button, select").forEach((el) => {
       el.disabled = !enabled;
@@ -1899,6 +1941,10 @@ async function loadConfigUI() {
     chkStatGpuTemp.checked = statItems.includes("gpu_temp");
     chkStatsInIsland.checked = !!appConfig.stats_in_island;
     chkStatsAlerts.checked = !!appConfig.stats_alerts;
+    chkNotifEnabled.checked = !!appConfig.notif_enabled;
+    chkNotifShowBody.checked = appConfig.notif_show_body !== false;
+    notifDurationSelect.value = String(Number(appConfig.notif_duration_ms) || 6000);
+    notifIgnoreInput.value = (Array.isArray(appConfig.notif_ignore) ? appConfig.notif_ignore : []).join(", ");
     updateHoverRevealIcon();
     updateSettingsState();
 
@@ -1944,6 +1990,10 @@ function collectConfig() {
     ].filter(Boolean),
     stats_in_island: chkStatsInIsland.checked,
     stats_alerts: chkStatsAlerts.checked,
+    notif_enabled: chkNotifEnabled.checked,
+    notif_show_body: chkNotifShowBody.checked,
+    notif_duration_ms: Number(notifDurationSelect.value) || 6000,
+    notif_ignore: parseIgnoreList(notifIgnoreInput.value),
     theme: themePreview,
     accent_from_art: chkAccentFromArt.checked,
     card_opacity: Number(cardOpacityRange.value) || 0.74,
@@ -1982,6 +2032,9 @@ btnSaveConfig.addEventListener("click", async () => {
     applyStatsConfig();
     if (!chkStatsInIsland.checked) islandStatsAlt = false;
     if (lastMediaState) updateIslandCompact(lastMediaState);
+
+    // The poller re-reads the permission once it runs with the new config
+    if (newConfig.notif_enabled) setTimeout(() => void refreshNotifAccess(), 2000);
 
     // Button feedback; the sheet stays open so you can keep tweaking other tabs
     btnSaveConfig.innerHTML = "<span>✓ Guardado</span>";

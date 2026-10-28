@@ -46,6 +46,18 @@ La ventana no es una tarjeta fija: es una cápsula que **se transforma** entre e
 - Alertas opcionales: CPU/GPU > 95 % sostenido 10 s o RAM > 90 % → aviso 2,5 s (máximo uno por métrica cada 5 min).
 - **Un único hilo muestreador** que duerme por completo cuando las stats están desactivadas o la ventana está oculta.
 
+### Avisos de notificaciones (opt-in)
+
+Deja Windows en **No molestar** y entérate igual: WMO muestra una copia **silenciosa** de cada notificación nueva arriba a la derecha, **sin sonido y sin quitarle el foco** a la app o al juego.
+
+- Lee el centro de notificaciones con la API pública `UserNotificationListener` (con el permiso de Windows en *Configuración › Privacidad y seguridad › Notificaciones*).
+- Sin empaquetar (MSIX) Windows no deja suscribirse al evento de cambios, así que se consulta cada 1,5 s: el aviso llega con ese retraso como máximo.
+- Ícono de la app que envía la notificación: logo de la Store en apps empaquetadas y, en apps de escritorio (Discord, Teams clásico…), el mismo ícono del menú Inicio vía `shell:AppsFolder`.
+- Pila de hasta 3 avisos (el más nuevo arriba), duración configurable (4/6/10 s), se pausan al pasar el ratón; clic o ✕ para descartar.
+- Privacidad: opción para mostrar solo la app y el título, y lista de apps a ignorar.
+- No se muestran mientras hay un juego en pantalla completa exclusiva.
+- Limitaciones: solo notificaciones que pasan por el sistema de Windows; los botones de la notificación original (p. ej. *Responder*) no se pueden usar desde el aviso.
+
 ### Temas y apariencia
 
 - **9 temas** con previsualización inmediata y guardado al confirmar:
@@ -110,7 +122,7 @@ WMO está pensado para convivir con juegos que usan **EAC, BattlEye, Vanguard o 
 - ❌ **No usa WMI** en bucles ni crea servicios/tareas programadas.
 - 🌐 **Única conexión de red**: `https://lrclib.net`, solo si activas las letras (opt-in). Se envían título, artista, álbum y duración.
 
-Lo que **sí** usa son APIs públicas de Windows en modo usuario: GSMTC, WASAPI, PDH, `GetSystemTimes`, `GlobalMemoryStatusEx`, `GetIfTable2`, `RegisterHotKey`, `GetCursorPos` y, opcionalmente, `nvml.dll` si el driver de NVIDIA ya la instaló.
+Lo que **sí** usa son APIs públicas de Windows en modo usuario: GSMTC, WASAPI, PDH, `GetSystemTimes`, `GlobalMemoryStatusEx`, `GetIfTable2`, `RegisterHotKey`, `GetCursorPos`, `UserNotificationListener` (solo con los avisos activados) y, opcionalmente, `nvml.dll` si el driver de NVIDIA ya la instaló.
 
 **Limitación de fullscreen exclusivo**: Windows no permite dibujar un overlay encima de una app D3D exclusiva sin minimizarla. En ese caso la isla se oculta y el atajo la muestra sin foco, pero puede quedar detrás. Para verla siempre, usa **pantalla completa sin bordes** en el juego.
 
@@ -160,6 +172,7 @@ wmo/
 │   ├── audio_session.rs# Volumen por aplicación vía WASAPI (mezclador de Windows)
 │   ├── volume.rs       # Volumen maestro del sistema (IAudioEndpointVolume)
 │   ├── sysstats.rs     # Muestreador de CPU/RAM/GPU/VRAM/red/disco y NVML opcional
+│   ├── notifications.rs# Avisos: lee el centro de notificaciones y muestra copias silenciosas
 │   ├── fullscreen.rs   # Detección de fullscreen exclusivo (D3D) en primer plano
 │   ├── hotkey.rs       # RegisterHotKey con hilo propio y mensajes bloqueantes
 │   ├── position.rs     # Posicionado top-center por monitor y DPI
@@ -167,5 +180,8 @@ wmo/
 └── ui/
     ├── index.html      # Isla compacta/activity, reproductor, letras y ajustes
     ├── style.css       # Tokens + 9 temas (Liquid, Frost, OLED, Mica, Neón…)
-    └── app.js          # Lógica frontend, morph de la isla, stats y temas
+    ├── app.js          # Lógica frontend, morph de la isla, stats y temas
+    ├── notify.html     # Ventana de avisos (arriba a la derecha, nunca toma el foco)
+    ├── notify.css      # Estilo de los avisos (reusa los tokens de tema)
+    └── notify.js       # Pila de avisos, temporizadores y tamaño de la ventana
 ```

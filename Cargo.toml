@@ -32,6 +32,9 @@ windows = { version = "0.61.3", features = [
     "Win32_NetworkManagement_Ndis",
     "Win32_Graphics_Dxgi",
     "Win32_UI_Shell",
+    "UI_Notifications",
+    "UI_Notifications_Management",
+    "ApplicationModel",
 ] }
 
 # ponytail: AV/binary hygiene. No panic=abort: the panic hook must keep working.

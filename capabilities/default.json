@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Permisos core para la ventana del overlay",
-  "windows": ["main"],
+  "windows": ["main", "notify"],
   "permissions": [
     "core:default",
     "core:event:allow-listen",

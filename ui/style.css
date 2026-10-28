@@ -1971,6 +1971,10 @@ label.set-row {
   color: var(--text-tertiary);
 }
 
+.set-label small.warn {
+  color: var(--warn);
+}
+
 /* Segmented control (replaces selects for short option lists) */
 .seg {
   display: inline-flex;
@@ -2148,6 +2152,29 @@ label.set-row {
 .key-select option {
   background: var(--option-bg);
   color: var(--option-text);
+}
+
+.text-input {
+  width: 100%;
+  background: var(--surface-control);
+  border: 1px solid var(--border-input);
+  color: var(--text-primary);
+  padding: 4px 9px;
+  border-radius: var(--radius-input);
+  font-size: calc(11px * var(--font-scale));
+  font-family: inherit;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: border-color 0.2s ease;
+}
+
+.text-input:focus {
+  border-color: var(--accent-color);
+}
+
+.text-input::placeholder {
+  color: var(--text-tertiary);
 }
 
 /* Rejected hotkey (already registered by another app) */

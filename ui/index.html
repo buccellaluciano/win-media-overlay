@@ -198,6 +198,7 @@
           <button class="settings-tab" data-tab="island" role="tab">Isla</button>
           <button class="settings-tab" data-tab="look" role="tab">Apariencia</button>
           <button class="settings-tab" data-tab="system" role="tab">Sistema</button>
+          <button class="settings-tab" data-tab="notify" role="tab">Avisos</button>
         </div>
         <button class="close-settings-btn" id="btnCloseSettings" title="Cerrar ajustes (Esc)">Listo</button>
       </div>
@@ -390,6 +391,40 @@
             <input type="checkbox" id="chkStatsAlerts" class="ios-switch">
             <span class="switch-slider"></span>
           </label>
+        </div>
+
+        <!-- Windows notifications -> quiet toasts -->
+        <div class="settings-page" data-page="notify">
+          <label class="set-row set-row-master">
+            <span class="set-label">Avisos de notificaciones <small id="notifAccess">Copia silenciosa arriba a la derecha</small></span>
+            <input type="checkbox" id="chkNotifEnabled" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row" data-dep="notify">
+            <span class="set-label">Mostrar el texto <small>Si no, solo la app y el título</small></span>
+            <input type="checkbox" id="chkNotifShowBody" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="set-row" data-dep="notify">
+            <span class="set-label">Duración</span>
+            <div class="seg" id="notifDurationSelect">
+              <button data-value="4000">4 s</button>
+              <button data-value="6000">6 s</button>
+              <button data-value="10000">10 s</button>
+            </div>
+          </div>
+
+          <div class="set-row set-row-stack" data-dep="notify">
+            <span class="set-label">Ignorar apps <small>Separadas por coma</small></span>
+            <input type="text" class="text-input" id="notifIgnoreInput" placeholder="p. ej. Teams, Outlook" maxlength="400" spellcheck="false">
+          </div>
+
+          <div class="set-row" data-dep="notify">
+            <span class="set-label">Probar <small>Muestra un aviso de ejemplo</small></span>
+            <button class="pill-btn" id="btnNotifTest">Probar aviso</button>
+          </div>
         </div>
       </div>
 
