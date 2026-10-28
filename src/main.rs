@@ -801,7 +801,16 @@ fn main() {
                             || state.source_app_id != last_source
                             || selected != last_selected;
 
-                        if is_visible || changed {
+                        // The 3 Hz stream (position/time) only matters while the full player is
+                        // shown; the compact pill just needs track/state changes.
+                        let player_shown = is_visible
+                            && *app_handle_polling
+                                .state::<AppState>()
+                                .island_mode
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                == IslandMode::Expanded;
+                        if player_shown || changed {
                             let _ = app_handle_polling.emit("media-state", &state);
                             last_title = state.title.clone();
                             last_artist = state.artist.clone();

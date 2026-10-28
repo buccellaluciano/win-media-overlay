@@ -26,7 +26,7 @@ use windows::Win32::System::Performance::{
 use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows::Win32::System::Threading::GetSystemTimes;
 
-use crate::AppState;
+use crate::{AppState, IslandMode};
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct SystemStats {
@@ -67,15 +67,27 @@ fn run(app: tauri::AppHandle, rx: Receiver<()>) {
     let mut last_sample: Option<Instant> = None;
 
     loop {
-        let (enabled, interval_ms) = {
+        let (enabled, interval_ms, shown_in_island) = {
             let state = app.state::<AppState>();
             let conf = state.config.lock().unwrap_or_else(|e| e.into_inner());
-            (conf.stats_enabled, conf.stats_interval_ms.clamp(500, 5000))
+            (
+                conf.stats_enabled,
+                conf.stats_interval_ms.clamp(500, 5000),
+                !conf.island_enabled || conf.stats_in_island,
+            )
         };
-        let visible = app
-            .get_webview_window("main")
-            .map(|w| w.is_visible().unwrap_or(false))
-            .unwrap_or(false);
+        // The compact pill is always visible: only sample there if it shows the stats summary.
+        // Island mode changes call wake(), so this resumes as soon as the player expands.
+        let player_shown = {
+            let state = app.state::<AppState>();
+            let mode = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
+            mode == IslandMode::Expanded || (mode != IslandMode::Hidden && shown_in_island)
+        };
+        let visible = player_shown
+            && app
+                .get_webview_window("main")
+                .map(|w| w.is_visible().unwrap_or(false))
+                .unwrap_or(false);
 
         if !enabled {
             // Release the query/NVML while the feature is off, then block: zero wakeups

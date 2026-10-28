@@ -612,8 +612,42 @@ function updateIslandCompact(state) {
     if (!showStats) requestAnimationFrame(() => checkMarquee(islandTitle, islandTitleBox));
   }
   islandEq.classList.toggle("playing", !!(state && state.is_playing));
+  syncEq();
   setIslandArt(has ? state.thumbnail_base64 || lastThumbnailBase64 : null);
 }
+
+// Mini equalizer at ~10 fps: every frame drawn over the blurred card re-runs the backdrop blur,
+// so the old 60 fps CSS loop kept the GPU at ~7 % while playing. Discrete steps read the same
+// at 14 px. Runs only while the compact pill is showing and the track is playing.
+const EQ_STEP_MS = 100;
+const eqBars = Array.from(islandEq.querySelectorAll("i"));
+let eqTimer = null;
+let eqPhase = 0;
+
+function eqStep() {
+  eqPhase += 1;
+  eqBars.forEach((bar, i) => {
+    const v = 0.3 + 0.7 * Math.abs(Math.sin(eqPhase * 0.62 + i * 1.7) * Math.cos(eqPhase * 0.23 + i));
+    bar.style.transform = `scaleY(${v.toFixed(2)})`;
+  });
+}
+
+function syncEq() {
+  const run =
+    islandMode === "compact" &&
+    islandEq.classList.contains("playing") &&
+    document.visibilityState === "visible";
+  if (run && !eqTimer) {
+    eqStep();
+    eqTimer = setInterval(eqStep, EQ_STEP_MS);
+  } else if (!run && eqTimer) {
+    clearInterval(eqTimer);
+    eqTimer = null;
+    eqBars.forEach((bar) => (bar.style.transform = ""));
+  }
+}
+
+document.addEventListener("visibilitychange", syncEq);
 
 function renderIslandActivity(item) {
   islandActivityLabel.textContent = item.label;
@@ -801,6 +835,9 @@ function applyIslandMode(mode) {
 
   morphCard(prevMode, mode, collapseFrom);
   reportHitRect();
+  syncEq();
+  // The smooth timeline only runs while the player is actually visible
+  if (mode === "expanded" && currentIsPlaying && currentDuration > 0) startTimelineTicker();
 }
 
 // Settings/popover must not collapse when the cursor leaves
@@ -1160,7 +1197,7 @@ function updateMediaUI(state) {
     scrubberHead.style.left = `${clampedPct}%`;
   }
   // Only run the smooth ticker while actually playing
-  if (currentIsPlaying && currentDuration > 0) startTimelineTicker();
+  if (currentIsPlaying && currentDuration > 0 && islandMode === "expanded") startTimelineTicker();
 
   // Synced lyrics follow the track/position
   updateLyricsForState(state);
@@ -2136,10 +2173,11 @@ function timelineTick(now) {
       syncLyricsToPosition();
     }
   }
-  if (currentIsPlaying && currentDuration > 0) {
+  // Idle or player hidden (island/compact): stop scheduling entirely; applyIslandMode restarts it
+  if (currentIsPlaying && currentDuration > 0 && islandMode === "expanded") {
     requestAnimationFrame(timelineTick);
   } else {
-    ticking = false; // idle: stop scheduling entirely
+    ticking = false;
   }
 }
 
