@@ -15,6 +15,7 @@ const titleBox = document.getElementById("titleBox");
 const trackTitle = document.getElementById("trackTitle");
 const trackArtist = document.getElementById("trackArtist");
 const trackAlbum = document.getElementById("trackAlbum");
+const subSep = document.getElementById("subSep");
 const appBadge = document.getElementById("appBadge");
 const badgeName = document.getElementById("badgeName");
 const timeCurrent = document.getElementById("timeCurrent");
@@ -420,7 +421,9 @@ function updateLyricsChevron() {
 function updateExpandedHeight() {
   if (isSettingsOpen || isSourcePopoverOpen) return; // those own the window size
   if (islandMode && islandMode !== "expanded") return;
-  const needed = Math.ceil(liquidCard.scrollHeight) + 12;
+  if (expandMorphTimer) return; // the running morph sets the final size
+  const content = cardMorphTimer ? expandedContentHeight() : liquidCard.scrollHeight;
+  const needed = Math.ceil(content) + 12;
   setWindowSize(480, Math.max(188, needed));
 }
 
@@ -462,8 +465,7 @@ btnLyricsToggle.addEventListener("click", (e) => {
   e.stopPropagation();
   lyricsCollapsed = !lyricsCollapsed;
   updateLyricsChevron();
-  applyLyricsPanelDom();
-  updateExpandedHeight();
+  void morphExpanded(applyLyricsPanelDom);
 });
 
 function updateLyricsForState(state) {
@@ -524,21 +526,6 @@ async function setWindowSize(width, height) {
   }
 }
 
-// Usable height on the window's own monitor, in physical px -> logical.
-// ponytail: screen.availHeight in the WebView ignores which monitor/where it sits, so tail got cut.
-async function maxWindowHeight() {
-  try {
-    const appWindow = window.__TAURI__.window.getCurrentWindow();
-    const mon = await appWindow.currentMonitor();
-    const sf = await appWindow.scaleFactor();
-    if (mon && mon.size && sf > 0) {
-      return Math.floor(mon.size.height / sf) - 24;
-    }
-  } catch (err) {
-    // fall through to the browser fallback
-  }
-  return (window.screen && window.screen.availHeight) || 1080;
-}
 let isOptimisticPlaying = null;
 let playOptimisticTimer = null;
 let volumeToastTimeout = null;
@@ -707,30 +694,83 @@ function morphCard(prevMode, mode, collapseFrom) {
   } else if (!nextIsland && prevIsland) {
     // Expanding: morph up to the natural height of the expanded content
     from = prevMode === "compact" ? 36 : 56;
-    to = Math.max(176, expandedView.scrollHeight + 2);
+    to = Math.max(176, expandedContentHeight());
   } else {
     from = prevMode === "compact" ? 36 : 56;
     to = mode === "compact" ? 36 : 56;
   }
   if (!from || !to) return;
 
-  // Same-task inline height pins the starting point; the rAF change animates it
+  // Pin the start, force a reflow, then set the target in the same task: the transition runs.
+  // (A rAF here could land after the cleanup timer when the WebView is throttled and leave the
+  // card stuck at a fixed height.)
   liquidCard.style.height = `${from}px`;
   void liquidCard.offsetHeight;
-  requestAnimationFrame(() => {
-    liquidCard.style.height = `${to}px`;
-  });
+  liquidCard.style.height = `${to}px`;
 
   if (cardMorphTimer) clearTimeout(cardMorphTimer);
   cardMorphTimer = setTimeout(() => {
     cardMorphTimer = null;
     liquidCard.style.height = ""; // back to auto in expanded / CSS height in island modes
-  }, 260);
+    if (islandMode === "expanded") updateExpandedHeight(); // settle on the real content height
+  }, MORPH_MS);
+}
+
+// Matches --morph-duration in style.css (+ a frame of slack)
+const MORPH_MS = 300;
+let expandMorphTimer = null;
+
+// Animate the expanded card between content heights (settings, popover, lyrics, stats).
+// The native window can't tween: it grows before the animation and shrinks after it.
+async function morphExpanded(applyChange) {
+  if ((islandMode && islandMode !== "expanded") || cardMorphTimer) {
+    applyChange();
+    updateExpandedHeight();
+    return;
+  }
+  if (expandMorphTimer) {
+    clearTimeout(expandMorphTimer);
+    expandMorphTimer = null;
+  }
+  const from = liquidCard.getBoundingClientRect().height;
+  liquidCard.style.height = "";
+  applyChange();
+  const to = liquidCard.getBoundingClientRect().height;
+  const winH = Math.max(188, Math.ceil(to) + 12);
+  if (Math.abs(to - from) < 1) {
+    await setWindowSize(480, winH);
+    return;
+  }
+  if (to > from) await setWindowSize(480, winH);
+  liquidCard.style.height = `${from}px`;
+  void liquidCard.offsetHeight; // same reflow trick as morphCard (no rAF race)
+  liquidCard.style.height = `${to}px`;
+  expandMorphTimer = setTimeout(() => {
+    expandMorphTimer = null;
+    liquidCard.style.height = "";
+    if (to < from) void setWindowSize(480, winH);
+  }, MORPH_MS);
+}
+
+// Expanded content height at the final card width. Right after leaving the island the card is
+// still ~240 px wide, so measuring it as-is wraps the stats chips and oversizes the window.
+function expandedContentHeight() {
+  const bw = parseFloat(getComputedStyle(liquidCard).borderTopWidth) || 0;
+  expandedView.style.width = `${480 - 12 - bw * 2}px`;
+  const h = expandedView.scrollHeight;
+  expandedView.style.width = "";
+  return h + bw * 2;
 }
 
 // Single place where the frontend mirrors the backend island state
 function applyIslandMode(mode, width, height) {
   if (!mode) return;
+  // An island change wins over a pending settings/popover morph (its cleanup would cut this one)
+  if (expandMorphTimer) {
+    clearTimeout(expandMorphTimer);
+    expandMorphTimer = null;
+    liquidCard.style.height = "";
+  }
   const prevMode = islandMode;
   const collapseFrom =
     prevMode === "expanded" && (mode === "compact" || mode === "activity")
@@ -747,7 +787,6 @@ function applyIslandMode(mode, width, height) {
   if (mode === "expanded") {
     clearActivities();
     applyLyricsPanelDom();
-    updateExpandedHeight();
   } else if (mode === "hidden") {
     clearActivities();
   } else if (mode === "compact") {
@@ -757,6 +796,8 @@ function applyIslandMode(mode, width, height) {
   if (mode !== "compact") islandStatsAlt = false;
 
   morphCard(prevMode, mode, collapseFrom);
+  // After morphCard: while it runs, the height is measured at the final width
+  if (mode === "expanded") updateExpandedHeight();
 }
 
 // Settings/popover must not collapse when the cursor leaves
@@ -776,7 +817,7 @@ const STAT_META = {
   vram: { label: "VRAM" },
   net: { label: "" },
   disk: { label: "Disco" },
-  gpu_temp: { label: "GPU" },
+  gpu_temp: { label: "Temp" },
 };
 
 function statAvailable(stats, key) {
@@ -1032,6 +1073,8 @@ function updateMediaUI(state) {
   if (trackArtist.textContent !== newArtist) trackArtist.textContent = newArtist;
   const newAlbum = state.album || "";
   if (trackAlbum.textContent !== newAlbum) trackAlbum.textContent = newAlbum;
+  // No album: no dangling "•" after the artist
+  subSep.classList.toggle("hidden", !newAlbum);
   const newBadge = state.source_name || "Windows Media";
   if (badgeName.textContent !== newBadge) badgeName.textContent = newBadge;
 
@@ -1389,19 +1432,24 @@ async function toggleSourcePopover(open) {
   updateIslandPin();
   if (isSourcePopoverOpen) {
     if (isSettingsOpen) await toggleSettings(false);
-    lyricsPanel.classList.add("hidden");
-    liquidCard.classList.add("popover-open");
     appBadge.classList.add("open");
-    sourcePopover.classList.remove("hidden");
-    await setWindowSize(480, 260);
     await loadAudioSources();
+    await morphExpanded(() => {
+      lyricsPanel.classList.add("hidden");
+      liquidCard.classList.add("popover-open");
+      sourcePopover.classList.remove("hidden");
+    });
   } else {
-    liquidCard.classList.remove("popover-open");
     appBadge.classList.remove("open");
-    sourcePopover.classList.add("hidden");
-    if (!isSettingsOpen) {
-      applyLyricsPanelDom();
-      updateExpandedHeight();
+    if (isSettingsOpen) {
+      liquidCard.classList.remove("popover-open");
+      sourcePopover.classList.add("hidden");
+    } else {
+      await morphExpanded(() => {
+        liquidCard.classList.remove("popover-open");
+        sourcePopover.classList.add("hidden");
+        applyLyricsPanelDom();
+      });
     }
   }
 }
@@ -1558,41 +1606,25 @@ async function toggleSettings(open) {
         await loadConfigUI();
         configDirty = false;
       }
-      // Lyrics panel yields to settings (they must not stack)
-      lyricsPanel.classList.add("hidden");
-      settingsPanel.classList.remove("hidden");
-      btnSettings.style.transform = "rotate(60deg)";
-      btnSettings.style.color = "var(--accent-color)";
-      // Fit the window to the actual panel height (DPI/font independent, avoids clipping)
-      settingsPanel.style.maxHeight = "none";
-      const needed = Math.ceil(liquidCard.getBoundingClientRect().height) + 18;
-      const max = await maxWindowHeight();
-      const height = Math.max(188, Math.min(needed, max));
-      if (needed > max) {
-        // Not enough screen: cap the panel so it scrolls instead of overflowing
-        const panelH = settingsPanel.getBoundingClientRect().height;
-        const other = needed - 18 - panelH;
-        settingsPanel.style.maxHeight = `${Math.max(140, max - other - 18)}px`;
-      }
-      await setWindowSize(480, height);
+      btnSettings.classList.add("active");
+      btnSettings.style.transform = "rotate(90deg)";
+      // The sheet replaces the player body, so the window stays compact (~330 px)
+      await morphExpanded(() => {
+        liquidCard.classList.add("settings-open");
+        settingsPanel.classList.remove("hidden");
+      });
+      updateSettingsTabIndicator();
+      updateSettingsState();
     } else {
-      // Discard unsaved theme/opacity previews
-      if (themePreview !== themeChoice) {
-        themePreview = themeChoice;
-        applyTheme(themeChoice);
-      }
-      if (
-        appConfig &&
-        Math.abs(Number(appConfig.card_opacity ?? 0.74) - opacityPreview) > 0.001
-      ) {
-        applyOpacity(appConfig.card_opacity ?? 0.74);
-      }
-      settingsPanel.classList.add("hidden");
-      settingsPanel.style.maxHeight = "";
-      btnSettings.style.transform = "rotate(0deg)";
-      btnSettings.style.color = "";
-      applyLyricsPanelDom();
-      updateExpandedHeight();
+      // Closing without saving discards every edit (theme/opacity previews included)
+      if (isConfigDirty()) await loadConfigUI();
+      btnSettings.classList.remove("active");
+      btnSettings.style.transform = "";
+      await morphExpanded(() => {
+        liquidCard.classList.remove("settings-open");
+        settingsPanel.classList.add("hidden");
+        applyLyricsPanelDom();
+      });
     }
   } finally {
     settingsBusy = false;
@@ -1647,6 +1679,122 @@ modBtns.forEach((btn) => {
 
 keySelect.addEventListener("change", updateBindBadge);
 
+// =========================================================
+// Settings sheet: tabs, segmented controls, dependencies, unsaved state
+// =========================================================
+
+const settingsTabs = document.getElementById("settingsTabs");
+const settingsHint = document.getElementById("settingsHint");
+const SETTINGS_TAB_ORDER = ["general", "island", "look", "system"];
+let settingsTab = "general";
+
+// Slide the pill under the active tab (measured, so labels can have any width)
+function updateSettingsTabIndicator() {
+  const active = settingsTabs.querySelector(".settings-tab.active");
+  if (!active) return;
+  settingsTabs.style.setProperty("--tab-x", `${active.offsetLeft - 2}px`);
+  settingsTabs.style.setProperty("--tab-w", `${active.offsetWidth}px`);
+}
+
+function showSettingsTab(tab) {
+  if (!SETTINGS_TAB_ORDER.includes(tab)) return;
+  // Pages slide in from the side of the tab you came from
+  const dir = SETTINGS_TAB_ORDER.indexOf(tab) >= SETTINGS_TAB_ORDER.indexOf(settingsTab) ? 1 : -1;
+  settingsTab = tab;
+  settingsTabs.querySelectorAll(".settings-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+    btn.setAttribute("aria-selected", btn.dataset.tab === tab ? "true" : "false");
+  });
+  settingsPanel.querySelectorAll(".settings-page").forEach((page) => {
+    const on = page.dataset.page === tab;
+    page.style.setProperty("--page-from", `${dir * 10}px`);
+    page.classList.toggle("active", on);
+    if (on) page.scrollTop = 0;
+  });
+  settingsPanel.querySelector(".settings-pages").scrollTop = 0;
+  updateSettingsTabIndicator();
+}
+
+settingsTabs.querySelectorAll(".settings-tab").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showSettingsTab(btn.dataset.tab);
+  });
+});
+
+// Segmented control with a select-like `.value`, so the config code reads it unchanged
+function makeSegmented(el) {
+  const buttons = Array.from(el.querySelectorAll("button"));
+  let current = buttons.length ? buttons[0].dataset.value : "";
+  const paint = () => buttons.forEach((b) => b.classList.toggle("active", b.dataset.value === current));
+  Object.defineProperty(el, "value", {
+    get: () => current,
+    set: (v) => {
+      const match = buttons.find((b) => Number(b.dataset.value) === Number(v));
+      if (match) current = match.dataset.value;
+      paint();
+    },
+  });
+  buttons.forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      current = b.dataset.value;
+      paint();
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    })
+  );
+  paint();
+}
+
+[volumeStepSelect, expandDelaySelect, statsIntervalSelect].forEach(makeSegmented);
+
+// Rows that only matter when a master switch is on (or off) fade out and lock
+function updateSettingsDependencies() {
+  const island = chkIslandEnabled.checked;
+  const stats = chkStatsEnabled.checked;
+  settingsPanel.querySelectorAll("[data-dep]").forEach((row) => {
+    const dep = row.dataset.dep;
+    const enabled = dep === "island" ? island : dep === "no-island" ? !island : stats;
+    row.classList.toggle("disabled", !enabled);
+    row.querySelectorAll("input, button, select").forEach((el) => {
+      el.disabled = !enabled;
+    });
+  });
+}
+
+// Comparable snapshot: list order and number formatting must not count as a change
+function configFingerprint(cfg) {
+  if (!cfg) return "";
+  const keys = Object.keys(collectConfig()).sort();
+  const out = {};
+  for (const k of keys) {
+    let v = cfg[k];
+    if (k === "stats_items" && Array.isArray(v)) v = [...v].sort();
+    if (k === "hotkey_modifiers" && Array.isArray(v)) v = v.map((m) => m.toLowerCase()).sort();
+    if (typeof v === "number") v = Math.round(v * 1000) / 1000;
+    out[k] = v;
+  }
+  return JSON.stringify(out);
+}
+
+function isConfigDirty() {
+  return !!appConfig && configFingerprint(collectConfig()) !== configFingerprint(appConfig);
+}
+
+function updateSettingsState() {
+  updateSettingsDependencies();
+  if (btnSaveConfig.classList.contains("saved")) return; // keep the confirmation visible
+  const dirty = isConfigDirty();
+  btnSaveConfig.disabled = !dirty;
+  settingsHint.textContent = dirty ? "Cambios sin guardar" : "Sin cambios";
+  settingsHint.classList.toggle("dirty", dirty);
+}
+
+// Any interaction inside the sheet may change the draft (after the control's own handler ran)
+["input", "change", "click"].forEach((type) =>
+  settingsPanel.addEventListener(type, () => setTimeout(updateSettingsState, 0))
+);
+
 // Theme selector: immediate preview, persisted on Save
 themeSwatches.forEach((btn) => {
   btn.addEventListener("click", (e) => {
@@ -1691,6 +1839,17 @@ btnHoverReveal.addEventListener("click", async (e) => {
   }
 });
 
+// Modifier pills + key from a config (also used to revert a rejected bind)
+function applyHotkeyUI(cfg) {
+  const mods = Array.isArray(cfg.hotkey_modifiers) ? cfg.hotkey_modifiers : [];
+  modBtns.forEach((btn) => {
+    const isMod = mods.some((m) => m.toLowerCase() === btn.dataset.mod.toLowerCase());
+    btn.classList.toggle("active", isMod);
+  });
+  keySelect.value = cfg.hotkey_key || "Space";
+  updateBindBadge();
+}
+
 // Load Configuration into UI
 async function loadConfigUI() {
   try {
@@ -1703,17 +1862,7 @@ async function loadConfigUI() {
     chkAccentFromArt.checked = appConfig.accent_from_art !== false;
     applyOpacity(appConfig.card_opacity ?? 0.74);
 
-    // Modifiers
-    modBtns.forEach((btn) => {
-      const isMod = appConfig.hotkey_modifiers.some(
-        (m) => m.toLowerCase() === btn.dataset.mod.toLowerCase()
-      );
-      btn.classList.toggle("active", isMod);
-    });
-
-    // Key
-    keySelect.value = appConfig.hotkey_key || "Space";
-    updateBindBadge();
+    applyHotkeyUI(appConfig);
 
     // Wheel volume step: snap legacy/odd values to the closest preset
     const step = Number(appConfig.volume_step);
@@ -1757,6 +1906,7 @@ async function loadConfigUI() {
     chkStatsInIsland.checked = !!appConfig.stats_in_island;
     chkStatsAlerts.checked = !!appConfig.stats_alerts;
     updateHoverRevealIcon();
+    updateSettingsState();
 
     if (!chkAmbientGlow.checked) {
       disableAmbientGlow();
@@ -1766,9 +1916,9 @@ async function loadConfigUI() {
   }
 }
 
-// Save Configuration
-btnSaveConfig.addEventListener("click", async () => {
-  const newConfig = {
+// The config the sheet currently describes (saved or not)
+function collectConfig() {
+  return {
     hotkey_modifiers: getSelectedModifiers(),
     hotkey_key: keySelect.value,
     // The app is always the Dynamic Island (top-center); legacy "custom" is normalized away
@@ -1805,6 +1955,12 @@ btnSaveConfig.addEventListener("click", async () => {
     accent_from_art: chkAccentFromArt.checked,
     card_opacity: Number(cardOpacityRange.value) || 0.74,
   };
+}
+
+// Save Configuration
+btnSaveConfig.addEventListener("click", async () => {
+  if (btnSaveConfig.disabled) return;
+  const newConfig = collectConfig();
 
   try {
     await invoke("update_app_config", { newConfig });
@@ -1834,22 +1990,25 @@ btnSaveConfig.addEventListener("click", async () => {
     if (!chkStatsInIsland.checked) islandStatsAlt = false;
     if (lastMediaState) updateIslandCompact(lastMediaState);
 
-    // Button feedback
-    const originalText = btnSaveConfig.innerHTML;
-    btnSaveConfig.innerHTML = "<span>✓ Guardado con éxito</span>";
+    // Button feedback; the sheet stays open so you can keep tweaking other tabs
+    btnSaveConfig.innerHTML = "<span>✓ Guardado</span>";
     btnSaveConfig.classList.add("saved");
+    settingsHint.textContent = "Preferencias guardadas";
+    settingsHint.classList.remove("dirty");
 
     setTimeout(() => {
-      btnSaveConfig.innerHTML = originalText;
+      btnSaveConfig.innerHTML = "<span>Guardar</span>";
       btnSaveConfig.classList.remove("saved");
-      toggleSettings(false);
-    }, 900);
+      updateSettingsState();
+    }, 1200);
   } catch (err) {
     console.error("Save config error:", err);
-    // The backend rejected the change (usually the hotkey is taken): keep the saved bind
-    await loadConfigUI();
-    applyDraggable(chkDraggable.checked);
+    // The backend rejected the change (usually the hotkey is taken): revert only the bind,
+    // keep the rest of the draft so nothing else is lost
+    if (appConfig) applyHotkeyUI(appConfig);
+    showSettingsTab("general");
     showBindError(String(err));
+    updateSettingsState();
   }
 });
 

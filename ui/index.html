@@ -110,8 +110,8 @@
           </div>
           <div class="track-sub-box">
             <span class="track-artist" id="trackArtist">Inicia tu música</span>
-            <span class="sub-separator" id="subSep">•</span>
-            <span class="track-album" id="trackAlbum">Windows 11</span>
+            <span class="sub-separator hidden" id="subSep">•</span>
+            <span class="track-album" id="trackAlbum"></span>
           </div>
         </div>
 
@@ -177,11 +177,11 @@
             <span class="vol-label" id="volLabel">50%</span>
           </div>
         </div>
-
-        <!-- System stats strip (Fase 3) -->
-        <div class="stats-strip hidden" id="statsStrip"></div>
       </div>
     </main>
+
+    <!-- System stats strip: full-width row under the player -->
+    <div class="stats-strip hidden" id="statsStrip"></div>
 
     <!-- Lyrics Panel (auto-shows only when synced lyrics are available) -->
     <section class="lyrics-panel hidden" id="lyricsPanel">
@@ -190,62 +190,38 @@
       </div>
     </section>
 
-    <!-- Settings Panel (Slides Down) -->
+    <!-- Settings: compact sheet with tabs (replaces the player while open) -->
     <section class="settings-panel hidden" id="settingsPanel">
-      <div class="settings-header">
-        <span class="settings-title">Personalización</span>
-        <button class="close-settings-btn" id="btnCloseSettings">Listo</button>
+      <div class="settings-top">
+        <div class="settings-tabs" id="settingsTabs" role="tablist">
+          <button class="settings-tab active" data-tab="general" role="tab">General</button>
+          <button class="settings-tab" data-tab="island" role="tab">Isla</button>
+          <button class="settings-tab" data-tab="look" role="tab">Apariencia</button>
+          <button class="settings-tab" data-tab="system" role="tab">Sistema</button>
+        </div>
+        <button class="close-settings-btn" id="btnCloseSettings" title="Cerrar ajustes (Esc)">Listo</button>
       </div>
 
-      <div class="settings-content">
-        <!-- Appearance -->
-        <div class="setting-group">
-          <label class="setting-label">Tema</label>
-          <div class="theme-grid" id="themeGrid">
-            <button class="theme-swatch" data-theme="liquid" title="Liquid Glass"><span class="sw"></span><span>Liquid</span></button>
-            <button class="theme-swatch" data-theme="frost" title="Cristal claro"><span class="sw"></span><span>Cristal</span></button>
-            <button class="theme-swatch" data-theme="oled" title="OLED negro"><span class="sw"></span><span>OLED</span></button>
-            <button class="theme-swatch" data-theme="mica" title="Mica de Windows 11"><span class="sw"></span><span>Mica</span></button>
-            <button class="theme-swatch" data-theme="neon" title="Neón"><span class="sw"></span><span>Neón</span></button>
-            <button class="theme-swatch" data-theme="sunset" title="Atardecer"><span class="sw"></span><span>Atardecer</span></button>
-            <button class="theme-swatch" data-theme="minimal" title="Minimal"><span class="sw"></span><span>Minimal</span></button>
-            <button class="theme-swatch" data-theme="contrast" title="Alto contraste"><span class="sw"></span><span>Contraste</span></button>
-            <button class="theme-swatch" data-theme="auto" title="Automático (sistema)"><span class="sw"></span><span>Auto</span></button>
-          </div>
-          <div class="theme-hint">Vista previa inmediata; se guarda con “Guardar Preferencias”.</div>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Acento según la carátula</span>
-            <input type="checkbox" id="chkAccentFromArt" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <div class="opacity-row">
-            <span class="plus-sign">Opacidad</span>
-            <input type="range" id="cardOpacityRange" min="0.4" max="1" step="0.01" value="0.74">
-            <span class="opacity-value" id="cardOpacityValue">74 %</span>
-          </div>
-        </div>
-
-        <!-- Hotkey Section -->
-        <div class="setting-group">
-          <label class="setting-label">Atajo de Teclado Global (Bind)</label>
-          <div class="hotkey-picker">
-            <div class="mod-pills">
-              <button class="pill-btn mod-btn" data-mod="Control" id="modCtrl">Ctrl</button>
-              <button class="pill-btn mod-btn" data-mod="Shift" id="modShift">Shift</button>
-              <button class="pill-btn mod-btn" data-mod="Alt" id="modAlt">Alt</button>
-              <button class="pill-btn mod-btn" data-mod="Win" id="modWin">Win</button>
-            </div>
-            <div class="key-selector-row">
+      <div class="settings-pages">
+        <!-- General -->
+        <div class="settings-page active" data-page="general">
+          <div class="set-row set-row-stack">
+            <span class="set-label">Atajo global <span class="bind-badge" id="bindBadge">Ctrl + Shift + Espacio</span></span>
+            <div class="hotkey-picker">
+              <div class="mod-pills">
+                <button class="pill-btn mod-btn" data-mod="Control" id="modCtrl">Ctrl</button>
+                <button class="pill-btn mod-btn" data-mod="Shift" id="modShift">Shift</button>
+                <button class="pill-btn mod-btn" data-mod="Alt" id="modAlt">Alt</button>
+                <button class="pill-btn mod-btn" data-mod="Win" id="modWin">Win</button>
+              </div>
               <span class="plus-sign">+</span>
               <select class="key-select" id="keySelect">
-                <option value="Space">Espacio (Space)</option>
+                <option value="Space">Espacio</option>
                 <option value="M">M</option>
                 <option value="P">P</option>
                 <option value="O">O</option>
                 <option value="X">X</option>
-                <option value="Media_Play_Pause">Play/Pause Key</option>
+                <option value="Media_Play_Pause">Play/Pause</option>
                 <option value="F8">F8</option>
                 <option value="F9">F9</option>
                 <option value="F10">F10</option>
@@ -261,152 +237,171 @@
                 <option value="S">S</option>
               </select>
             </div>
-          </div>
-          <div class="current-bind-display">
-            Bind actual: <span class="bind-badge" id="bindBadge">Ctrl + Shift + Espacio</span>
-          </div>
-          <div class="bind-error hidden" id="bindError"></div>
-        </div>
-
-        <!-- Mouse wheel volume step -->
-        <div class="setting-group">
-          <label class="setting-label" for="volumeStepSelect">Paso de volumen (rueda del ratón)</label>
-          <select class="key-select" id="volumeStepSelect">
-            <option value="0.01">1 %</option>
-            <option value="0.02">2 %</option>
-            <option value="0.05">5 %</option>
-            <option value="0.1">10 %</option>
-          </select>
-        </div>
-
-        <!-- Dynamic Island -->
-        <div class="setting-group">
-          <label class="setting-label">Isla dinámica</label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Isla dinámica (compacta + actividades)</span>
-            <input type="checkbox" id="chkIslandEnabled" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Compacta siempre visible sin reproducción</span>
-            <input type="checkbox" id="chkIslandAlwaysVisible" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Notificaciones de pista y fuente</span>
-            <input type="checkbox" id="chkIslandActivities" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Permitir clics a través en modo compacto</span>
-            <input type="checkbox" id="chkIslandClickThrough" class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <div class="key-selector-row">
-            <span class="plus-sign">Retardo al expandir</span>
-            <select class="key-select" id="expandDelaySelect">
-              <option value="0">Sin retardo</option>
-              <option value="150">150 ms</option>
-              <option value="250">250 ms</option>
-              <option value="500">500 ms</option>
-              <option value="1000">1000 ms</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- System stats settings -->
-        <div class="setting-group">
-          <label class="setting-label">Estadísticas del sistema</label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Mostrar estadísticas (CPU, RAM, GPU, red...)</span>
-            <input type="checkbox" id="chkStatsEnabled" class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <div class="key-selector-row">
-            <span class="plus-sign">Intervalo</span>
-            <select class="key-select" id="statsIntervalSelect">
-              <option value="500">0,5 s</option>
-              <option value="1000">1 s</option>
-              <option value="2000">2 s</option>
-              <option value="5000">5 s</option>
-            </select>
+            <div class="bind-error hidden" id="bindError"></div>
           </div>
 
-          <div class="metric-grid">
-            <label class="metric-item"><input type="checkbox" id="chkStatCpu" checked> CPU</label>
-            <label class="metric-item"><input type="checkbox" id="chkStatGpu" checked> GPU</label>
-            <label class="metric-item"><input type="checkbox" id="chkStatRam" checked> RAM</label>
-            <label class="metric-item"><input type="checkbox" id="chkStatVram" checked> VRAM</label>
-            <label class="metric-item"><input type="checkbox" id="chkStatNet" checked> Red</label>
-            <label class="metric-item"><input type="checkbox" id="chkStatDisk" checked> Disco</label>
-            <label class="metric-item"><input type="checkbox" id="chkStatGpuTemp" checked> Temp GPU</label>
+          <div class="set-row">
+            <span class="set-label">Paso de volumen <small>Rueda del ratón</small></span>
+            <div class="seg" id="volumeStepSelect">
+              <button data-value="0.01">1%</button>
+              <button data-value="0.02">2%</button>
+              <button data-value="0.05">5%</button>
+              <button data-value="0.1">10%</button>
+            </div>
           </div>
 
-          <label class="toggle-item">
-            <span class="toggle-text">Resumen en la isla compacta</span>
-            <input type="checkbox" id="chkStatsInIsland" class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Alertas de recursos (CPU/GPU/RAM)</span>
-            <input type="checkbox" id="chkStatsAlerts" class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-        </div>
-
-        <!-- Toggles Section -->
-        <div class="setting-group toggles-group">
-          <label class="toggle-item">
-            <span class="toggle-text">Permitir arrastrar la ventana</span>
-            <input type="checkbox" id="chkDraggable" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Respetar pantalla completa (no molestar juegos/video)</span>
-            <input type="checkbox" id="chkRespectFullscreen" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Ocultar al hacer clic fuera (Auto-hide)</span>
-            <input type="checkbox" id="chkAutoHide" class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Resplandor ambiental dinámico (Liquid Glow)</span>
-            <input type="checkbox" id="chkAmbientGlow" checked class="ios-switch">
-            <span class="switch-slider"></span>
-          </label>
-
-          <label class="toggle-item">
-            <span class="toggle-text">Volumen de la app (mezclador; si no hay sesión usa el del sistema)</span>
+          <label class="set-row">
+            <span class="set-label">Volumen por aplicación <small>Si no hay sesión, usa el del sistema</small></span>
             <input type="checkbox" id="chkAppVolume" checked class="ios-switch">
             <span class="switch-slider"></span>
           </label>
 
-          <label class="toggle-item">
-            <span class="toggle-text">Letras sincronizadas (LRCLIB, requiere internet)</span>
+          <label class="set-row">
+            <span class="set-label">Letras sincronizadas <small>LRCLIB · requiere internet</small></span>
             <input type="checkbox" id="chkLyrics" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row">
+            <span class="set-label">Respetar pantalla completa <small>No molesta a juegos ni vídeo</small></span>
+            <input type="checkbox" id="chkRespectFullscreen" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row">
+            <span class="set-label">Permitir arrastrar la ventana</span>
+            <input type="checkbox" id="chkDraggable" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row" data-dep="no-island">
+            <span class="set-label">Ocultar al hacer clic fuera <small>Solo sin isla dinámica</small></span>
+            <input type="checkbox" id="chkAutoHide" class="ios-switch">
             <span class="switch-slider"></span>
           </label>
         </div>
 
-        <!-- Save button -->
-        <div class="settings-actions">
-          <button class="save-btn" id="btnSaveConfig">
-            <span>Guardar Preferencias</span>
-          </button>
+        <!-- Dynamic Island -->
+        <div class="settings-page" data-page="island">
+          <label class="set-row set-row-master">
+            <span class="set-label">Isla dinámica <small>Píldora compacta que se expande al pasar el ratón</small></span>
+            <input type="checkbox" id="chkIslandEnabled" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row" data-dep="island">
+            <span class="set-label">Siempre visible <small>Aunque no haya reproducción</small></span>
+            <input type="checkbox" id="chkIslandAlwaysVisible" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row" data-dep="island">
+            <span class="set-label">Notificaciones <small>Cambio de pista, fuente y volumen</small></span>
+            <input type="checkbox" id="chkIslandActivities" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row" data-dep="island">
+            <span class="set-label">Clics a través <small>La píldora no tapa lo que hay debajo</small></span>
+            <input type="checkbox" id="chkIslandClickThrough" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="set-row" data-dep="island">
+            <span class="set-label">Retardo al expandir</span>
+            <div class="seg" id="expandDelaySelect">
+              <button data-value="0">0</button>
+              <button data-value="150">0,15 s</button>
+              <button data-value="250">0,25 s</button>
+              <button data-value="500">0,5 s</button>
+              <button data-value="1000">1 s</button>
+            </div>
+          </div>
         </div>
+
+        <!-- Appearance -->
+        <div class="settings-page" data-page="look">
+          <div class="theme-grid" id="themeGrid">
+            <button class="theme-swatch" data-theme="liquid" title="Liquid Glass"><span class="sw"></span><span>Liquid</span></button>
+            <button class="theme-swatch" data-theme="frost" title="Cristal claro"><span class="sw"></span><span>Cristal</span></button>
+            <button class="theme-swatch" data-theme="oled" title="OLED negro"><span class="sw"></span><span>OLED</span></button>
+            <button class="theme-swatch" data-theme="mica" title="Mica de Windows 11"><span class="sw"></span><span>Mica</span></button>
+            <button class="theme-swatch" data-theme="neon" title="Neón"><span class="sw"></span><span>Neón</span></button>
+            <button class="theme-swatch" data-theme="sunset" title="Atardecer"><span class="sw"></span><span>Atardecer</span></button>
+            <button class="theme-swatch" data-theme="minimal" title="Minimal"><span class="sw"></span><span>Minimal</span></button>
+            <button class="theme-swatch" data-theme="contrast" title="Alto contraste"><span class="sw"></span><span>Contraste</span></button>
+            <button class="theme-swatch" data-theme="auto" title="Automático (según Windows)"><span class="sw"></span><span>Auto</span></button>
+          </div>
+
+          <label class="set-row">
+            <span class="set-label">Acento según la carátula</span>
+            <input type="checkbox" id="chkAccentFromArt" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row">
+            <span class="set-label">Resplandor ambiental</span>
+            <input type="checkbox" id="chkAmbientGlow" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="set-row">
+            <span class="set-label">Opacidad</span>
+            <div class="opacity-row">
+              <input type="range" id="cardOpacityRange" min="0.4" max="1" step="0.01" value="0.74">
+              <span class="opacity-value" id="cardOpacityValue">74 %</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- System stats -->
+        <div class="settings-page" data-page="system">
+          <label class="set-row set-row-master">
+            <span class="set-label">Estadísticas del sistema <small>Se muestran bajo el reproductor</small></span>
+            <input type="checkbox" id="chkStatsEnabled" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="set-row set-row-stack" data-dep="stats">
+            <span class="set-label">Métricas</span>
+            <div class="metric-grid">
+              <label class="metric-item"><input type="checkbox" id="chkStatCpu" checked><span>CPU</span></label>
+              <label class="metric-item"><input type="checkbox" id="chkStatGpu" checked><span>GPU</span></label>
+              <label class="metric-item"><input type="checkbox" id="chkStatRam" checked><span>RAM</span></label>
+              <label class="metric-item"><input type="checkbox" id="chkStatVram" checked><span>VRAM</span></label>
+              <label class="metric-item"><input type="checkbox" id="chkStatNet" checked><span>Red</span></label>
+              <label class="metric-item"><input type="checkbox" id="chkStatDisk" checked><span>Disco</span></label>
+              <label class="metric-item"><input type="checkbox" id="chkStatGpuTemp" checked><span>Temp GPU</span></label>
+            </div>
+          </div>
+
+          <div class="set-row" data-dep="stats">
+            <span class="set-label">Intervalo</span>
+            <div class="seg" id="statsIntervalSelect">
+              <button data-value="500">0,5 s</button>
+              <button data-value="1000">1 s</button>
+              <button data-value="2000">2 s</button>
+              <button data-value="5000">5 s</button>
+            </div>
+          </div>
+
+          <label class="set-row" data-dep="stats">
+            <span class="set-label">Resumen en la isla <small>Alterna con el título cada 4 s</small></span>
+            <input type="checkbox" id="chkStatsInIsland" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <label class="set-row" data-dep="stats">
+            <span class="set-label">Alertas de recursos <small>CPU/GPU &gt; 95 % o RAM &gt; 90 %</small></span>
+            <input type="checkbox" id="chkStatsAlerts" class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-footer">
+        <span class="settings-hint" id="settingsHint">Sin cambios</span>
+        <button class="save-btn" id="btnSaveConfig" disabled><span>Guardar</span></button>
       </div>
     </section>
     </div>

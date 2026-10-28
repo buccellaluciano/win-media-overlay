@@ -532,7 +532,8 @@ fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: 
         );
         let app_delayed = app.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(220));
+            // Must outlast the CSS morph (--morph-duration: 0.28s) or the window clips the card
+            thread::sleep(Duration::from_millis(300));
             let state = app_delayed.state::<AppState>();
             if *state.island_mode.lock().unwrap_or_else(|e| e.into_inner()) != mode {
                 return;
