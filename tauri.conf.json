@@ -21,7 +21,7 @@
         "title": "WMO",
         "label": "main",
         "width": 480,
-        "height": 188,
+        "height": 460,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

@@ -67,7 +67,6 @@ const bindError = document.getElementById("bindError");
 const chkIslandEnabled = document.getElementById("chkIslandEnabled");
 const chkIslandAlwaysVisible = document.getElementById("chkIslandAlwaysVisible");
 const chkIslandActivities = document.getElementById("chkIslandActivities");
-const chkIslandClickThrough = document.getElementById("chkIslandClickThrough");
 const expandDelaySelect = document.getElementById("expandDelaySelect");
 const statsStrip = document.getElementById("statsStrip");
 const chkStatsEnabled = document.getElementById("chkStatsEnabled");
@@ -114,8 +113,6 @@ let currentIsPlaying = false;
 let isSettingsOpen = false;
 let settingsBusy = false;
 let configDirty = false;
-let currentWindowWidth = 480;
-let currentWindowHeight = 188;
 let islandMode = ""; // compact | activity | expanded | hidden, owned by the backend
 let lastMediaState = null;
 let lastIslandTrackKey = "";
@@ -417,15 +414,43 @@ function updateLyricsChevron() {
   iconLyricsChevron.style.transform = expanded ? "rotate(0deg)" : "rotate(180deg)";
 }
 
-// Fit the native window to the real content height (base player + lyrics + stats chips)
-function updateExpandedHeight() {
-  if (isSettingsOpen || isSourcePopoverOpen) return; // those own the window size
-  if (islandMode && islandMode !== "expanded") return;
-  if (expandMorphTimer) return; // the running morph sets the final size
-  const content = cardMorphTimer ? expandedContentHeight() : liquidCard.scrollHeight;
-  const needed = Math.ceil(content) + 12;
-  setWindowSize(480, Math.max(188, needed));
+// The native window is a fixed transparent box (it never resizes: that flashed a shifted
+// frame). Tell the backend where the card is so everything else stays click-through.
+let pointerCapture = false; // a slider drag may leave the card: keep the mouse meanwhile
+let lastHitKey = "";
+
+function reportHitRect() {
+  const r = liquidCard.getBoundingClientRect();
+  const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)},${pointerCapture}`;
+  if (key === lastHitKey) return;
+  lastHitKey = key;
+  invoke("set_hit_rect", {
+    x: r.left,
+    y: r.top,
+    width: r.width,
+    height: r.height,
+    capture: pointerCapture,
+  }).catch(() => {});
 }
+
+// Every size change (morphs, settings, lyrics, stats) reports itself; no manual calls needed
+new ResizeObserver(reportHitRect).observe(liquidCard);
+// Safety net if a resize callback is ever skipped (throttled WebView): cheap, deduped
+setInterval(reportHitRect, 1000);
+
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".scrubber, .vol-bar, input[type='range']")) {
+    pointerCapture = true;
+    reportHitRect();
+  }
+});
+["pointerup", "pointercancel"].forEach((type) =>
+  window.addEventListener(type, () => {
+    if (!pointerCapture) return;
+    pointerCapture = false;
+    reportHitRect();
+  })
+);
 
 function setLyricsAvailable(available) {
   lyricsAvailable = !!available;
@@ -436,7 +461,6 @@ function setLyricsAvailable(available) {
   }
   updateLyricsChevron();
   applyLyricsPanelDom();
-  updateExpandedHeight();
 }
 
 function syncLyricsToPosition() {
@@ -512,19 +536,6 @@ function updateLyricsForState(state) {
     });
 }
 
-// Centralized window resize: skips redundant OS resizes (each one re-layouts + re-blurs the card)
-async function setWindowSize(width, height) {
-  // Compact/activity sizes are owned by the backend; content only resizes expanded
-  if (islandMode && islandMode !== "expanded") return;
-  if (width === currentWindowWidth && height === currentWindowHeight) return;
-  currentWindowWidth = width;
-  currentWindowHeight = height;
-  try {
-    await invoke("set_window_size", { width, height });
-  } catch (err) {
-    console.error("set_window_size error:", err);
-  }
-}
 
 let isOptimisticPlaying = null;
 let playOptimisticTimer = null;
@@ -712,7 +723,7 @@ function morphCard(prevMode, mode, collapseFrom) {
   cardMorphTimer = setTimeout(() => {
     cardMorphTimer = null;
     liquidCard.style.height = ""; // back to auto in expanded / CSS height in island modes
-    if (islandMode === "expanded") updateExpandedHeight(); // settle on the real content height
+    reportHitRect();
   }, MORPH_MS);
 }
 
@@ -720,12 +731,11 @@ function morphCard(prevMode, mode, collapseFrom) {
 const MORPH_MS = 300;
 let expandMorphTimer = null;
 
-// Animate the expanded card between content heights (settings, popover, lyrics, stats).
-// The native window can't tween: it grows before the animation and shrinks after it.
-async function morphExpanded(applyChange) {
+// Animate the expanded card between content heights (settings, popover, lyrics). Only the card
+// moves: the window is a fixed transparent box, so nothing native has to keep up.
+function morphExpanded(applyChange) {
   if ((islandMode && islandMode !== "expanded") || cardMorphTimer) {
     applyChange();
-    updateExpandedHeight();
     return;
   }
   if (expandMorphTimer) {
@@ -736,34 +746,26 @@ async function morphExpanded(applyChange) {
   liquidCard.style.height = "";
   applyChange();
   const to = liquidCard.getBoundingClientRect().height;
-  const winH = Math.max(188, Math.ceil(to) + 12);
-  if (Math.abs(to - from) < 1) {
-    await setWindowSize(480, winH);
-    return;
-  }
-  if (to > from) await setWindowSize(480, winH);
+  if (Math.abs(to - from) < 1) return;
   liquidCard.style.height = `${from}px`;
   void liquidCard.offsetHeight; // same reflow trick as morphCard (no rAF race)
   liquidCard.style.height = `${to}px`;
   expandMorphTimer = setTimeout(() => {
     expandMorphTimer = null;
     liquidCard.style.height = "";
-    if (to < from) void setWindowSize(480, winH);
+    reportHitRect();
   }, MORPH_MS);
 }
 
-// Expanded content height at the final card width. Right after leaving the island the card is
-// still ~240 px wide, so measuring it as-is wraps the stats chips and oversizes the window.
+// Expanded content height. .expanded-view has a fixed width (style.css), so this is right even
+// while the card is still ~240 px wide coming out of the island.
 function expandedContentHeight() {
   const bw = parseFloat(getComputedStyle(liquidCard).borderTopWidth) || 0;
-  expandedView.style.width = `${480 - 12 - bw * 2}px`;
-  const h = expandedView.scrollHeight;
-  expandedView.style.width = "";
-  return h + bw * 2;
+  return expandedView.scrollHeight + bw * 2;
 }
 
 // Single place where the frontend mirrors the backend island state
-function applyIslandMode(mode, width, height) {
+function applyIslandMode(mode) {
   if (!mode) return;
   // An island change wins over a pending settings/popover morph (its cleanup would cut this one)
   if (expandMorphTimer) {
@@ -779,10 +781,6 @@ function applyIslandMode(mode, width, height) {
 
   islandMode = mode;
   document.documentElement.dataset.mode = mode;
-  if (Number.isFinite(width) && Number.isFinite(height) && mode !== "hidden") {
-    currentWindowWidth = width;
-    currentWindowHeight = height;
-  }
   liquidCard.classList.remove("island-out");
   if (mode === "expanded") {
     clearActivities();
@@ -796,8 +794,7 @@ function applyIslandMode(mode, width, height) {
   if (mode !== "compact") islandStatsAlt = false;
 
   morphCard(prevMode, mode, collapseFrom);
-  // After morphCard: while it runs, the height is measured at the final width
-  if (mode === "expanded") updateExpandedHeight();
+  reportHitRect();
 }
 
 // Settings/popover must not collapse when the cursor leaves
@@ -977,7 +974,6 @@ function renderStats(stats) {
     buildStatsChips(keys);
     statsBuiltKey = buildKey;
     statsStrip.classList.toggle("hidden", keys.length === 0);
-    updateExpandedHeight();
   }
   keys.forEach((key) => updateStatChip(key, stats));
   checkStatsAlerts(stats);
@@ -989,7 +985,6 @@ function resetStatsUI() {
   statNodes = {};
   statsStrip.innerHTML = "";
   statsStrip.classList.add("hidden");
-  updateExpandedHeight();
 }
 
 function checkStatsAlerts(stats) {
@@ -1885,7 +1880,6 @@ async function loadConfigUI() {
     chkIslandEnabled.checked = appConfig.island_enabled !== false;
     chkIslandAlwaysVisible.checked = appConfig.island_always_visible !== false;
     chkIslandActivities.checked = appConfig.island_activities !== false;
-    chkIslandClickThrough.checked = !!appConfig.island_click_through_compact;
     const delay = String(Number(appConfig.hover_expand_delay_ms));
     const delays = ["0", "150", "250", "500", "1000"];
     expandDelaySelect.value = delays.includes(delay) ? delay : "250";
@@ -1936,7 +1930,6 @@ function collectConfig() {
     island_enabled: chkIslandEnabled.checked,
     island_always_visible: chkIslandAlwaysVisible.checked,
     island_activities: chkIslandActivities.checked,
-    island_click_through_compact: chkIslandClickThrough.checked,
     hover_expand_delay_ms: Number(expandDelaySelect.value) || 0,
     stats_enabled: chkStatsEnabled.checked,
     stats_interval_ms: Number(statsIntervalSelect.value) || 1000,
@@ -2111,10 +2104,10 @@ async function init() {
   // Apply the island state before the first content paint
   try {
     const info = await invoke("get_island_mode");
-    applyIslandMode(info.mode, info.width, info.height);
+    applyIslandMode(info.mode);
   } catch (err) {
     console.warn("Island mode unavailable:", err);
-    applyIslandMode("expanded", 480, 188);
+    applyIslandMode("expanded");
   }
 
   await syncMasterVolume();
@@ -2145,7 +2138,7 @@ async function init() {
   // Island state changes (compact / activity / expanded / hidden)
   await listen("island-mode", (event) => {
     const payload = event.payload || {};
-    applyIslandMode(payload.mode, payload.width, payload.height);
+    applyIslandMode(payload.mode);
   });
 
   // System stats from the backend sampler

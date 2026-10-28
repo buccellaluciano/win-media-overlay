@@ -722,27 +722,31 @@ html, body {
     opacity 0.22s ease;
 }
 
-/* Dynamic Island sizes: the native window matches these exactly (no transparent hit area) */
+/* Dynamic Island sizes. The native window stays 480 px wide in every mode (transparent and
+   click-through outside the card); same top margin as expanded so the top edge never jumps. */
 html[data-mode="compact"] .liquid-card {
   width: 240px;
   height: 36px;
-  margin: 0 auto;
   border-radius: var(--radius-island);
 }
 
 html[data-mode="activity"] .liquid-card {
   width: 340px;
   height: 56px;
-  margin: 0 auto;
   border-radius: var(--radius-activity);
 }
 
 /* The expanded player and the island are the same card: they crossfade while the card morphs */
+/* Fixed at the expanded inner width (window 480 - 12 margin - borders): while the card morphs
+   to/from the island its width animates, and an auto width made every element reflow on each
+   frame (the "twitch"). Now the content keeps its layout and is only clipped by the card. */
 .expanded-view {
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 0 auto;
+  width: calc(480px - 12px - 2 * var(--border-width));
+  align-self: center;
   min-height: 0;
   opacity: 1;
   /* Enter: wait for the card to start growing so content doesn't pop in clipped */
@@ -751,7 +755,9 @@ html[data-mode="activity"] .liquid-card {
 
 html:is([data-mode="compact"], [data-mode="activity"], [data-mode="hidden"]) .expanded-view {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.1s ease;

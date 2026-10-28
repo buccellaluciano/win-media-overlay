@@ -18,13 +18,13 @@ La ventana no es una tarjeta fija: es una cápsula que **se transforma** entre e
 |---|---|---|
 | `compact` | 240 × 36 | Mini carátula, título con marquee y ecualizador animado (solo reproduciendo) |
 | `activity` | 340 × 56 | Aviso transitorio de 2,5 s: cambio de pista, cambio de fuente o volumen |
-| `expanded` | 480 × 188+ | Reproductor completo (controles, scrubber, volumen, letras, ajustes y stats) |
+| `expanded` | 468 × 176+ | Reproductor completo (controles, scrubber, volumen, letras, ajustes y stats) |
 
 - **Hover**: la compacta se expande tras `250 ms` (configurable 0–1000 ms); al salir del área vuelve a compacta a los `450 ms`.
 - **Clic** en la compacta la expande.
 - **Atajo global** alterna expandida ↔ compacta/oculta según la configuración.
-- **Clic a través** opcional en compacta: los clics atraviesan la cápsula hasta que el cursor entra en ella.
-- **Sin área transparente que bloquee clics**: la ventana nativa mide exactamente lo que se ve.
+- **Ventana fija de 480 × 460**: solo la tarjeta se transforma dentro; la ventana nativa nunca cambia de tamaño (redimensionar un WebView mostraba un cuadro desplazado en cada transición).
+- **Sin área transparente que bloquee clics**: todo lo que no es la tarjeta es clic-a-través; el frontend informa su rectángulo y el backend activa/desactiva el paso de clics según el cursor.
 - **Actividades**: cola de hasta 3 avisos, sin duplicados consecutivos, 2,5 s cada uno.
 
 ### Integración con la API universal de Windows (WinRT GSMTC)
@@ -86,7 +86,7 @@ Engranaje (esquina superior derecha) → panel de ajustes:
 
 1. **Tema**: rejilla de swatches con previsualización inmediata (se revierte si cierras sin guardar), acento por carátula y slider de opacidad.
 2. **Atajo de teclado**: modificadores y tecla, con detección de conflictos.
-3. **Isla dinámica**: activar, compacta siempre visible, actividades, clic a través y retardo de expansión.
+3. **Isla dinámica**: activar, compacta siempre visible, actividades y retardo de expansión.
 4. **Estadísticas del sistema**: activar, intervalo, métricas, resumen en la isla y alertas.
 5. **Comportamiento**: arrastre, resplandor ambiental, auto-ocultado, volumen por aplicación, respeto de pantalla completa y letras.
 6. **Guardar Preferencias** aplica y persiste los cambios.

@@ -25,11 +25,18 @@ use tauri::{Emitter, LogicalSize, Manager, Size, WebviewWindow, WindowEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::POINT;
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_DONOTROUND, DWM_WINDOW_CORNER_PREFERENCE,
+};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, ShowWindow, SW_SHOWNOACTIVATE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, SetWindowPos, ShowWindow, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
+    SW_SHOWNOACTIVATE,
+};
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
@@ -41,9 +48,26 @@ pub struct AppState {
     pub island_mode: Mutex<IslandMode>,
     pub island_prev_mode: Mutex<IslandMode>,
     pub island_pinned: AtomicBool, // settings/popover open: don't collapse on hover-out
-    pub island_ignore: AtomicBool, // click-through active in compact mode
+    pub island_ignore: AtomicBool, // click-through active (cursor outside the card)
     pub has_media: AtomicBool,     // updated by the polling loop, read by the hover watcher
+    // Visible card in window CSS px, reported by the frontend; everything else is click-through
+    pub hit_rect: Mutex<Option<HitRect>>,
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct HitRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    capture: bool, // a drag is in progress: keep receiving the mouse even outside the card
+}
+
+// ponytail: the window has ONE fixed size in every mode. Resizing a WebView2 window shows a
+// frame or two of the old content anchored top-left (the card slid sideways on every island
+// morph); now only the card morphs inside a transparent, click-through box.
+const WINDOW_W: f64 = 480.0;
+const WINDOW_H: f64 = 460.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IslandMode {
@@ -63,30 +87,11 @@ impl IslandMode {
         }
     }
 
-    fn size(self) -> Option<(f64, f64)> {
-        match self {
-            IslandMode::Hidden => None,
-            IslandMode::Compact => Some((240.0, 36.0)),
-            IslandMode::Activity => Some((340.0, 56.0)),
-            IslandMode::Expanded => Some((480.0, 188.0)),
-        }
-    }
-
-    fn rank(self) -> u8 {
-        match self {
-            IslandMode::Hidden => 0,
-            IslandMode::Compact => 1,
-            IslandMode::Activity => 2,
-            IslandMode::Expanded => 3,
-        }
-    }
 }
 
 #[derive(Clone, serde::Serialize)]
 struct IslandModePayload {
     mode: &'static str,
-    width: f64,
-    height: f64,
 }
 
 // Per-app desired volume/mute (in-memory): lets us re-apply after a player recreates its audio session
@@ -307,16 +312,27 @@ fn update_app_config(
     Ok(())
 }
 
+// The card's box inside the fixed window (CSS px); the hover thread makes the rest click-through
 #[tauri::command]
-fn set_window_size(width: f64, height: f64, window: WebviewWindow) -> Result<(), String> {
-    if !width.is_finite() || !height.is_finite() {
-        return Err("Invalid window size".to_string());
+fn set_hit_rect(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    capture: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if ![x, y, width, height].iter().all(|v| v.is_finite()) {
+        return Err("Invalid hit rect".to_string());
     }
-    let width = width.clamp(100.0, 4000.0);
-    let height = height.clamp(100.0, 4000.0);
-    window
-        .set_size(Size::Logical(LogicalSize { width, height }))
-        .map_err(|e| e.to_string())
+    *state.hit_rect.lock().unwrap_or_else(|e| e.into_inner()) = Some(HitRect {
+        x: x.clamp(0.0, WINDOW_W),
+        y: y.clamp(0.0, WINDOW_H),
+        w: width.clamp(0.0, WINDOW_W),
+        h: height.clamp(0.0, WINDOW_H),
+        capture,
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -454,7 +470,30 @@ fn monitor_at_cursor(cursor: POINT) -> Option<(MONITORINFO, f64)> {
     }
 }
 
-fn place_island(win: &WebviewWindow, logical_width: f64) {
+// Fixed size + top-center of its monitor in ONE SetWindowPos (also fixes the size after a DPI
+// change). Only called while hidden or at startup, so the user never sees the window move.
+fn place_window(win: &WebviewWindow) {
+    let (logical_width, logical_height) = (WINDOW_W, WINDOW_H);
+    if let (Some(mon), Ok(hwnd)) = (win.current_monitor().ok().flatten(), win.hwnd()) {
+        let scale = mon.scale_factor();
+        let p = mon.position();
+        let s = mon.size();
+        let w = (logical_width * scale).round() as i32;
+        let h = (logical_height * scale).round() as i32;
+        let x = p.x + (s.width as i32 - w) / 2;
+        let y = p.y + (28.0 * scale) as i32;
+        let ok = unsafe {
+            SetWindowPos(hwnd, None, x, y, w, h, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
+        };
+        if ok.is_ok() {
+            return;
+        }
+    }
+    // Fallback (no monitor/handle): the old two-step path
+    let _ = win.set_size(Size::Logical(LogicalSize {
+        width: logical_width,
+        height: logical_height,
+    }));
     if let Some(mon) = win.current_monitor().ok().flatten() {
         let p = mon.position();
         let s = mon.size();
@@ -463,19 +502,63 @@ fn place_island(win: &WebviewWindow, logical_width: f64) {
     }
 }
 
-fn cursor_inside_window(win: &WebviewWindow, cursor: POINT, margin: i32) -> bool {
-    match (win.outer_position(), win.outer_size()) {
-        (Ok(pos), Ok(size)) => {
-            cursor.x >= pos.x - margin
-                && cursor.x <= pos.x + size.width as i32 + margin
-                && cursor.y >= pos.y - margin
-                && cursor.y <= pos.y + size.height as i32 + margin
-        }
-        _ => false,
+// Windows 11 draws a faint 1px border (and rounds corners) around undecorated windows; on a
+// transparent overlay that shows as a translucent box around the card. No-op on Windows 10.
+fn remove_dwm_frame(win: &WebviewWindow) {
+    let Ok(hwnd) = win.hwnd() else {
+        return;
+    };
+    unsafe {
+        let none: u32 = DWMWA_COLOR_NONE;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &none as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        let corner = DWMWCP_DONOTROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const DWM_WINDOW_CORNER_PREFERENCE as *const core::ffi::c_void,
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        );
     }
 }
 
-// Single point that changes island state: native size, position and frontend event.
+// Cursor over the visible card (+ margin, physical px). Falls back to the whole window until
+// the frontend has reported the card's box.
+fn cursor_in_card(win: &WebviewWindow, hit: Option<HitRect>, cursor: POINT, margin: i32) -> bool {
+    let (Ok(pos), Ok(size)) = (win.inner_position(), win.inner_size()) else {
+        return false;
+    };
+    let (x, y, w, h) = match hit {
+        Some(r) => {
+            let sf = win.scale_factor().unwrap_or(1.0);
+            (
+                pos.x + (r.x * sf) as i32,
+                pos.y + (r.y * sf) as i32,
+                (r.w * sf) as i32,
+                (r.h * sf) as i32,
+            )
+        }
+        None => (pos.x, pos.y, size.width as i32, size.height as i32),
+    };
+    cursor.x >= x - margin
+        && cursor.x <= x + w + margin
+        && cursor.y >= y - margin
+        && cursor.y <= y + h + margin
+}
+
+fn current_hit_rect(app: &tauri::AppHandle) -> Option<HitRect> {
+    *app.state::<AppState>()
+        .hit_rect
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+// Single point that changes island state. The window keeps its size: only the card morphs
+// (in CSS), so no native resize can flash a shifted frame.
 fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: bool) {
     let state = app.state::<AppState>();
     let prev = {
@@ -499,86 +582,34 @@ fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: 
         let _ = win.set_ignore_cursor_events(false);
         state.island_ignore.store(false, Ordering::Relaxed);
         let _ = win.hide();
-        let _ = app.emit(
-            "island-mode",
-            IslandModePayload {
-                mode: mode.as_str(),
-                width: 0.0,
-                height: 0.0,
-            },
-        );
+        let _ = app.emit("island-mode", IslandModePayload { mode: mode.as_str() });
         return;
     }
 
-    let Some((width, height)) = mode.size() else {
-        return;
-    };
-    let shrink = prev.rank() > 0 && mode.rank() < prev.rank();
-
-    if mode != IslandMode::Compact {
-        let _ = win.set_ignore_cursor_events(false);
-        state.island_ignore.store(false, Ordering::Relaxed);
+    let visible = win.is_visible().unwrap_or(false);
+    if !visible {
+        // (Re)appearing: recenter on its monitor while still hidden, so nothing visibly moves
+        place_window(&win);
     }
-
-    if shrink {
-        // Animate the CSS collapse first; the native window follows (no transparent gap)
-        let _ = app.emit(
-            "island-mode",
-            IslandModePayload {
-                mode: mode.as_str(),
-                width,
-                height,
-            },
-        );
-        let app_delayed = app.clone();
-        thread::spawn(move || {
-            // Must outlast the CSS morph (--morph-duration: 0.28s) or the window clips the card
-            thread::sleep(Duration::from_millis(300));
-            let state = app_delayed.state::<AppState>();
-            if *state.island_mode.lock().unwrap_or_else(|e| e.into_inner()) != mode {
-                return;
-            }
-            if let Some(win) = app_delayed.get_webview_window("main") {
-                let _ = win.set_size(Size::Logical(LogicalSize { width, height }));
-                place_island(&win, width);
-            }
-        });
-    } else {
-        // Grow the native window first, then let the CSS animate
-        let _ = win.set_size(Size::Logical(LogicalSize { width, height }));
-        place_island(&win, width);
-        if activate {
-            let _ = win.show();
-            let _ = win.unminimize();
-            let _ = win.set_focus();
-        } else if !win.is_visible().unwrap_or(false) {
-            // Appearing for a session change must never steal focus from a game/app
-            if let Ok(hwnd) = win.hwnd() {
-                unsafe {
-                    let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                }
+    if activate {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    } else if !visible {
+        // Appearing for a session change must never steal focus from a game/app
+        if let Ok(hwnd) = win.hwnd() {
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             }
         }
-        let _ = app.emit(
-            "island-mode",
-            IslandModePayload {
-                mode: mode.as_str(),
-                width,
-                height,
-            },
-        );
     }
+    let _ = app.emit("island-mode", IslandModePayload { mode: mode.as_str() });
 }
 
 #[tauri::command]
 fn get_island_mode(state: tauri::State<'_, AppState>) -> IslandModePayload {
     let mode = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
-    let (width, height) = mode.size().unwrap_or((0.0, 0.0));
-    IslandModePayload {
-        mode: mode.as_str(),
-        width,
-        height,
-    }
+    IslandModePayload { mode: mode.as_str() }
 }
 
 #[tauri::command]
@@ -623,6 +654,7 @@ fn main() {
         island_pinned: AtomicBool::new(false),
         island_ignore: AtomicBool::new(false),
         has_media: AtomicBool::new(false),
+        hit_rect: Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -648,26 +680,16 @@ fn main() {
             get_island_mode,
             request_island_mode,
             set_island_pinned,
-            set_window_size,
+            set_hit_rect,
             hide_window,
             toggle_window,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
+            remove_dwm_frame(&window);
 
-            // Initial window size: 480 x 188
-            let _ = window.set_size(Size::Logical(LogicalSize {
-                width: 480.0,
-                height: 188.0,
-            }));
-
-            // Set initial position
-            let _ = apply_window_position(
-                &window,
-                &initial_config.position_preset,
-                initial_config.custom_x,
-                initial_config.custom_y,
-            );
+            // Fixed size for the whole session (see WINDOW_W/WINDOW_H), top-center
+            place_window(&window);
 
             // Keep the overlay on top; it only steps aside while a fullscreen app is in front
             let _ = window.set_always_on_top(true);
@@ -803,7 +825,6 @@ fn main() {
                         respect_fullscreen,
                         island_enabled,
                         island_always_visible,
-                        click_through,
                         expand_delay,
                     ) = {
                         let state = app_handle_hover.state::<AppState>();
@@ -813,7 +834,6 @@ fn main() {
                             conf.respect_fullscreen,
                             conf.island_enabled,
                             conf.island_always_visible,
-                            conf.island_click_through_compact,
                             conf.hover_expand_delay_ms,
                         )
                     };
@@ -873,17 +893,12 @@ fn main() {
                                         } else {
                                             let mut cursor = POINT::default();
                                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
-                                                let inside = cursor_inside_window(&win, cursor, 2);
-                                                let want_ignore = click_through && !inside;
-                                                let ignore_now =
-                                                    state.island_ignore.load(Ordering::Relaxed);
-                                                if want_ignore != ignore_now {
-                                                    let _ = win.set_ignore_cursor_events(want_ignore);
-                                                    state.island_ignore.store(
-                                                        want_ignore,
-                                                        Ordering::Relaxed,
-                                                    );
-                                                }
+                                                let inside = cursor_in_card(
+                                                    &win,
+                                                    current_hit_rect(&app_handle_hover),
+                                                    cursor,
+                                                    2,
+                                                );
                                                 if inside {
                                                     match hover_since {
                                                         Some(t)
@@ -921,7 +936,14 @@ fn main() {
                                         } else {
                                             let mut cursor = POINT::default();
                                             if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
-                                                if cursor_inside_window(&win, cursor, 14) {
+                                                let margin =
+                                                    (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
+                                                if cursor_in_card(
+                                                    &win,
+                                                    current_hit_rect(&app_handle_hover),
+                                                    cursor,
+                                                    margin,
+                                                ) {
                                                     outside_since = None;
                                                 } else {
                                                     let now = Instant::now();
@@ -990,18 +1012,15 @@ fn main() {
                                         pending_hide = None;
                                         sysstats::wake();
                                     }
-                                    // Re-enter (window box or the top edge) cancels the hide
+                                    // Re-enter (card box or the top edge) cancels the hide
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
                                     let inside = in_zone(cursor)
-                                        || match (win.outer_position(), win.outer_size()) {
-                                            (Ok(pos), Ok(size)) => {
-                                                cursor.x >= pos.x - margin
-                                                    && cursor.x <= pos.x + size.width as i32 + margin
-                                                    && cursor.y >= pos.y - margin
-                                                    && cursor.y <= pos.y + size.height as i32 + margin
-                                            }
-                                            _ => true,
-                                        };
+                                        || cursor_in_card(
+                                            &win,
+                                            current_hit_rect(&app_handle_hover),
+                                            cursor,
+                                            margin,
+                                        );
                                     if inside {
                                         pending_hide = None;
                                         outside_since = None;
@@ -1010,15 +1029,12 @@ fn main() {
                                 } else if !win.is_focused().unwrap_or(false) {
                                     let margin = (14.0 * win.scale_factor().unwrap_or(1.0)) as i32;
                                     let inside = in_zone(cursor)
-                                        || match (win.outer_position(), win.outer_size()) {
-                                            (Ok(pos), Ok(size)) => {
-                                                cursor.x >= pos.x - margin
-                                                    && cursor.x <= pos.x + size.width as i32 + margin
-                                                    && cursor.y >= pos.y - margin
-                                                    && cursor.y <= pos.y + size.height as i32 + margin
-                                            }
-                                            _ => true,
-                                        };
+                                        || cursor_in_card(
+                                            &win,
+                                            current_hit_rect(&app_handle_hover),
+                                            cursor,
+                                            margin,
+                                        );
                                     if inside {
                                         outside_since = None;
                                     } else {
@@ -1037,9 +1053,30 @@ fn main() {
                                 }
                             }
                         }
+
+                        // The window is a fixed, mostly transparent box: everywhere except the
+                        // card it must let clicks through to whatever is underneath.
+                        if win.is_visible().unwrap_or(false) {
+                            let mut cursor = POINT::default();
+                            if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                                let state = app_handle_hover.state::<AppState>();
+                                let want_ignore = match current_hit_rect(&app_handle_hover) {
+                                    Some(r) if !r.capture => {
+                                        !cursor_in_card(&win, Some(r), cursor, 0)
+                                    }
+                                    _ => false,
+                                };
+                                if want_ignore != state.island_ignore.load(Ordering::Relaxed) {
+                                    let _ = win.set_ignore_cursor_events(want_ignore);
+                                    state.island_ignore.store(want_ignore, Ordering::Relaxed);
+                                }
+                            }
+                        }
                     }
 
-                    thread::sleep(Duration::from_millis(120));
+                    // ponytail: 50 ms so the card turns clickable before a quick click lands
+                    // (GetCursorPos is a cheap read, no hooks)
+                    thread::sleep(Duration::from_millis(50));
                 }
             });
 

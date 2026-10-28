@@ -37,8 +37,6 @@ pub struct AppConfig {
     pub island_always_visible: bool, // compact visible even without a media session
     #[serde(default = "d_true")]
     pub island_activities: bool, // transient notifications on track/source changes
-    #[serde(default)]
-    pub island_click_through_compact: bool, // compact mode ignores the mouse unless hovered
     #[serde(default = "d_expand")]
     pub hover_expand_delay_ms: u32, // hover time before compact expands, 0..=1500
     #[serde(default)]
@@ -131,7 +129,6 @@ impl Default for AppConfig {
             island_enabled: true,
             island_always_visible: true,
             island_activities: true,
-            island_click_through_compact: false,
             hover_expand_delay_ms: 250,
             stats_enabled: false,
             stats_interval_ms: 1000,
