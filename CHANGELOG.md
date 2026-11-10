@@ -30,7 +30,7 @@ Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.
 
 ## [0.2.0] — 2026-10-27
 
-### Fase 1 — Corrección de bugs (`9a0b732`)
+### Fase 1 — Corrección de bugs (`273e494`)
 
 - Eliminada la entrada sintética de teclado (`keybd_event`) y el comando `adjust_volume` muerto.
 - Volumen por app sin `OpenProcess`: matching por identificador de sesión WASAPI (ruta del exe) con caché `pid → stem` de 5 s.
@@ -44,7 +44,7 @@ Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.
 - Un único mecanismo de arrastre; hover en el monitor del cursor (`MonitorFromPoint` + `GetDpiForMonitor`); manager GSMTC recreado si falla; MIME real de la carátula; timeout y caché acotada de letras; CSS muerto eliminado.
 - Higiene de binario: `lto`, `codegen-units = 1`, `opt-level = "s"`, `strip`, metadatos de bundle y sección de firma en README.
 
-### Fase 2 — Isla dinámica real (`0a16ac0`, `d089b40`)
+### Fase 2 — Isla dinámica real (`f6c1a75`, `f23ac77`)
 
 - Estados `Hidden / Compact / Activity / Expanded` con dueño en el backend (`set_island_mode`): tamaño nativo, posición top-center y evento `island-mode`.
 - Morph sin parpadeo: al crecer se agranda la ventana y luego anima el CSS; al encoger anima primero y reduce la ventana 220 ms después. La ventana mide exactamente lo visible.
@@ -54,7 +54,7 @@ Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.
 - Clic a través opcional en compacta; atajo que alterna expandida ↔ compacta/oculta; fullscreen exclusivo oculta y restaura el modo previo.
 - Config nueva: `island_enabled`, `island_always_visible`, `island_activities`, `island_click_through_compact`, `hover_expand_delay_ms`.
 
-### Fase 3 — Estadísticas del sistema (`a8dfee7`)
+### Fase 3 — Estadísticas del sistema (`623eff8`)
 
 - Nuevo `src/sysstats.rs` con un único hilo muestreador, creado de forma perezosa y **bloqueado** cuando las stats están desactivadas o la ventana oculta.
 - CPU (`GetSystemTimes`), RAM (`GlobalMemoryStatusEx`), GPU/VRAM/disco (PDH), red (`GetIfTable2`) y temperatura NVIDIA opcional (`nvml.dll` solo si ya existe).
@@ -62,7 +62,7 @@ Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.
 - Chips con barra de color, actualización solo de nodos cambiados, resumen opcional en la isla compacta y alertas de CPU/GPU/RAM con histéresis y límite temporal.
 - Config nueva: `stats_enabled`, `stats_interval_ms`, `stats_items`, `stats_in_island`, `stats_alerts`.
 
-### Fase 4 — Temas (`f3f4dfd`)
+### Fase 4 — Temas (`a1b4799`)
 
 - `style.css` tokenizado por completo: colores, radios, blurs y sombras solo en bloques de variables.
 - 9 temas: `liquid`, `frost`, `oled`, `mica`, `neon`, `sunset`, `minimal`, `contrast` y `auto` (sigue el modo claro/oscuro del sistema en vivo).
@@ -71,7 +71,7 @@ Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.
 - Config nueva: `theme`, `accent_from_art`, `card_opacity`.
 - Botón Guardar con confirmación por clase CSS y `--success` (sin hex inline).
 
-### Fase 5 — Heurística de selección de fuente (`5bd300b`)
+### Fase 5 — Heurística de selección de fuente (`1507e97`)
 
 - Puntuación por sesión GSMTC: +100 reproduciendo, +40 sesión mostrada, +20 título/duración, +10 sesión actual de Windows, −50 recién iniciada (<1,5 s), −30 duración <8 s; empate a favor de la mostrada.
 - Metadatos por sesión cacheados 2 s y seguimiento de inicio de reproducción por AUMID.

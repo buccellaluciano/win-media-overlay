@@ -1,6 +1,6 @@
 # Video acoplado (PiP del navegador) — plan de trabajo
 
-Estado: **terminado y probado** (versión 1.0.0). Backend `53483b5`, frontend `5693312`, correcciones `9e773d9`, `e4147db`, `7638d9e` y `6e71d01`. Este archivo queda como registro del diseño.
+Estado: **terminado y probado** (versión 1.0.0). Backend `18f2e62`, frontend `0c956e2`, correcciones `4cbc29e`, `403a823`, `e22e0c4` y `0548ee3`. Este archivo queda como registro del diseño.
 
 Desvíos del plan:
 
@@ -61,7 +61,7 @@ Decisiones ya tomadas con el usuario:
 ### 0. Toolchain
 - [x] Instalar Rust (rustup). La primera compilación es **sin** `--offline` para bajar los crates que fija
   `Cargo.lock`; no se agregan dependencias. Desde ahí, `cargo build --release --offline`.
-- [x] Verificar que compila el commit `60f2e41` (las opciones de config) antes de seguir.
+- [x] Verificar que compila el commit `9402188` (las opciones de config) antes de seguir.
 
 ### 1. Backend: `src/pip.rs` (nuevo)
 APIs Win32 permitidas: no son hooks, no abren procesos y no inyectan nada. Verificá cada firma en
