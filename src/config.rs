@@ -63,9 +63,17 @@ pub struct AppConfig {
     pub notif_duration_ms: u32,
     #[serde(default)]
     pub notif_ignore: Vec<String>, // app names (substring, case-insensitive) never shown
+    #[serde(default = "d_true")]
+    pub pip_dock_enabled: bool, // drop a browser PiP window on the card to dock it
+    #[serde(default = "d_pip_layout")]
+    pub pip_layout: String, // "cinema" (video replaces art + title) or "art" (video in the art slot)
+    #[serde(default = "d_pip_island")]
+    pub pip_island: String, // docked video while the island is collapsed: "hide" or "float"
 }
 
 pub const STAT_ITEMS: [&str; 7] = ["cpu", "gpu", "ram", "vram", "net", "disk", "gpu_temp"];
+pub const PIP_LAYOUTS: [&str; 2] = ["cinema", "art"];
+pub const PIP_ISLAND: [&str; 2] = ["hide", "float"];
 pub const THEMES: [&str; 9] = [
     "liquid",
     "frost",
@@ -92,6 +100,8 @@ fn d_stats_items() -> Vec<String> {
 fn d_theme() -> String { "liquid".to_string() }
 fn d_opacity() -> f32 { 0.74 }
 fn d_notif_ms() -> u32 { 6000 }
+fn d_pip_layout() -> String { "cinema".to_string() }
+fn d_pip_island() -> String { "hide".to_string() }
 
 impl AppConfig {
     // Clamp values from old or hand-edited configs so nothing downstream gets garbage
@@ -125,6 +135,12 @@ impl AppConfig {
             }
         }
         self.notif_ignore = ignore;
+        if !PIP_LAYOUTS.contains(&self.pip_layout.as_str()) {
+            self.pip_layout = d_pip_layout();
+        }
+        if !PIP_ISLAND.contains(&self.pip_island.as_str()) {
+            self.pip_island = d_pip_island();
+        }
     }
 }
 
@@ -160,6 +176,9 @@ impl Default for AppConfig {
             notif_show_body: true,
             notif_duration_ms: d_notif_ms(),
             notif_ignore: Vec::new(),
+            pip_dock_enabled: true,
+            pip_layout: d_pip_layout(),
+            pip_island: d_pip_island(),
         }
     }
 }
