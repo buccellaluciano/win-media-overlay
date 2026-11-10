@@ -31,6 +31,8 @@ const btnNext = document.getElementById("btnNext");
 const btnSettings = document.getElementById("btnSettings");
 const btnHide = document.getElementById("btnHide");
 const btnHoverReveal = document.getElementById("btnHoverReveal");
+const btnQuickDrag = document.getElementById("btnQuickDrag");
+const btnQuickStats = document.getElementById("btnQuickStats");
 const btnLyricsToggle = document.getElementById("btnLyricsToggle");
 const iconLyricsChevron = document.getElementById("iconLyricsChevron");
 const settingsPanel = document.getElementById("settingsPanel");
@@ -1895,22 +1897,44 @@ function applyDraggable(enabled) {
   liquidCard.classList.toggle("no-drag", !enabled);
 }
 
-// Hover-reveal toggle lives as a header icon, left of the settings gear
+// Quick toggles live as header icons, left of the settings gear
 function updateHoverRevealIcon() {
   const on = !!(appConfig && appConfig.hover_reveal);
   btnHoverReveal.classList.toggle("active", on);
+  btnQuickDrag.classList.toggle("active", !!(appConfig && appConfig.draggable !== false));
+  btnQuickStats.classList.toggle("active", !!(appConfig && appConfig.stats_enabled));
 }
 
-btnHoverReveal.addEventListener("click", async (e) => {
-  e.stopPropagation();
+// Flip one saved flag right away; the matching settings switch (if any) follows
+// so an open sheet doesn't report it as an unsaved change.
+async function quickToggle(key, checkbox, apply) {
   if (!appConfig) return;
-  appConfig.hover_reveal = !appConfig.hover_reveal;
+  const on = key === "draggable" ? appConfig.draggable === false : !appConfig[key];
+  appConfig[key] = on;
+  if (checkbox) checkbox.checked = on;
   updateHoverRevealIcon();
+  if (apply) apply(on);
+  updateSettingsState();
   try {
     await invoke("update_app_config", { newConfig: appConfig });
   } catch (err) {
-    console.error("Save hover reveal error:", err);
+    console.error(`Save ${key} error:`, err);
   }
+}
+
+btnHoverReveal.addEventListener("click", (e) => {
+  e.stopPropagation();
+  void quickToggle("hover_reveal", null, null);
+});
+
+btnQuickDrag.addEventListener("click", (e) => {
+  e.stopPropagation();
+  void quickToggle("draggable", chkDraggable, applyDraggable);
+});
+
+btnQuickStats.addEventListener("click", (e) => {
+  e.stopPropagation();
+  void quickToggle("stats_enabled", chkStatsEnabled, () => applyStatsConfig());
 });
 
 // Modifier pills + key from a config (also used to revert a rejected bind)
@@ -2052,6 +2076,7 @@ btnSaveConfig.addEventListener("click", async () => {
     applyTheme(themeChoice);
     applyOpacity(newConfig.card_opacity);
     applyDraggable(chkDraggable.checked);
+    updateHoverRevealIcon();
     // Ambient glow toggle takes effect immediately
     if (chkAmbientGlow.checked) {
       if (lastThumbnailBase64) setAmbientGlow(lastThumbnailBase64);
