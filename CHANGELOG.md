@@ -2,6 +2,12 @@
 
 Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 
+## [1.0.1] — 2026-11-10
+
+### Corregido
+
+- **Recuadro sombreado alrededor de la tarjeta** en los temas Cristal, OLED, Mica, Neón y Atardecer. La ventana mide 480 px y la tarjeta queda a 6 px de cada borde: la sombra exterior (hasta 30 px) llegaba a esos bordes y se cortaba en seco. Ahora se desvanece en 5 px como máximo hacia los costados y cae hacia abajo; el brillo de Neón y el de la zona para soltar el video también se achicaron.
+
 ## [1.0.0] — 2026-11-10
 
 Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.

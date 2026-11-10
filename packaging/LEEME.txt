@@ -1,4 +1,4 @@
-WMO - Win11 Media Overlay 1.0.0
+WMO - Win11 Media Overlay 1.0.1
 ===============================
 
 Ejecutar
