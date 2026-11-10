@@ -2344,3 +2344,101 @@ label.set-row:active .ios-switch:checked + .switch-slider::after {
 :root[data-theme="minimal"] .ambient-glow {
   display: none;
 }
+
+/* =========================================================
+   Docked browser video (PiP). The browser's own window is moved over .pip-slot by the
+   backend; the slot is only the frame behind it.
+   ========================================================= */
+.pip-slot {
+  display: none;
+  position: relative;
+  border-radius: var(--radius-art);
+  background: var(--surface-sunken);
+  border: 1px solid var(--art-border);
+  box-shadow: var(--art-shadow);
+}
+
+.liquid-card.pip-docked .pip-slot {
+  display: block;
+}
+
+.liquid-card.pip-docked .art-container {
+  display: none;
+}
+
+/* Cinema: 16:9 video across the whole card, a slim bar of title + controls underneath */
+.liquid-card.pip-docked.pip-cinema .player-body {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.liquid-card.pip-docked.pip-cinema .pip-slot {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.liquid-card.pip-docked.pip-cinema .content-container {
+  width: 100%;
+  gap: 4px;
+}
+
+/* Art: video in place of the artwork, at Chrome's minimum PiP size */
+.liquid-card.pip-docked.pip-art .player-body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: center;
+}
+
+.liquid-card.pip-docked.pip-art .pip-slot {
+  grid-column: 1;
+  grid-row: 1;
+  width: 260px;
+  height: 146px;
+}
+
+.liquid-card.pip-docked.pip-art .content-container {
+  display: contents;
+}
+
+.liquid-card.pip-docked.pip-art .metadata-wrapper {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.liquid-card.pip-docked.pip-art .timeline-container,
+.liquid-card.pip-docked.pip-art .actions-row {
+  grid-column: 1 / -1;
+}
+
+/* Drop zone while a PiP window is dragged over the card */
+.pip-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--text-primary);
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.liquid-card.pip-drop {
+  border-color: var(--accent-color);
+  box-shadow: var(--card-shadow), 0 0 0 2px rgba(var(--accent-rgb), 0.55),
+    0 0 22px rgba(var(--accent-rgb), 0.45);
+}
+
+.liquid-card.pip-drop .pip-drop-hint {
+  opacity: 1;
+}

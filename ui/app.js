@@ -33,6 +33,11 @@ const btnHide = document.getElementById("btnHide");
 const btnHoverReveal = document.getElementById("btnHoverReveal");
 const btnQuickDrag = document.getElementById("btnQuickDrag");
 const btnQuickStats = document.getElementById("btnQuickStats");
+const btnPipUndock = document.getElementById("btnPipUndock");
+const pipSlot = document.getElementById("pipSlot");
+const chkPipDock = document.getElementById("chkPipDock");
+const pipLayoutSelect = document.getElementById("pipLayoutSelect");
+const pipIslandSelect = document.getElementById("pipIslandSelect");
 const btnLyricsToggle = document.getElementById("btnLyricsToggle");
 const iconLyricsChevron = document.getElementById("iconLyricsChevron");
 const settingsPanel = document.getElementById("settingsPanel");
@@ -122,6 +127,7 @@ let isSettingsOpen = false;
 let settingsBusy = false;
 let configDirty = false;
 let islandMode = ""; // compact | activity | expanded | hidden, owned by the backend
+let pipDocked = false; // a browser PiP window is docked on the card (owned by the backend)
 let lastMediaState = null;
 let lastIslandTrackKey = "";
 let lastIslandSource = "";
@@ -406,6 +412,8 @@ function renderLyrics(lines) {
 
 // Panel is shown when lyrics exist, the user hasn't collapsed them, and no other panel is open
 function lyricsShouldShow() {
+  // The cinema video takes the room the lyrics would need (the window is a fixed 460 px)
+  if (pipDocked && pipLayout() === "cinema") return false;
   return lyricsAvailable && !lyricsCollapsed;
 }
 
@@ -439,7 +447,55 @@ function reportHitRect() {
     height: r.height,
     capture: pointerCapture,
   }).catch(() => {});
+  reportPipSlot();
 }
+
+// Docked video: where the backend must put the browser's PiP window (CSS px in the window).
+// Width 0 = no slot (island collapsed, settings/popover over the player): the video hides.
+let lastPipKey = "";
+
+function pipLayout() {
+  return appConfig && appConfig.pip_layout === "art" ? "art" : "cinema";
+}
+
+function reportPipSlot() {
+  const usable =
+    pipDocked &&
+    islandMode === "expanded" &&
+    !isSettingsOpen &&
+    !isSourcePopoverOpen &&
+    !liquidCard.classList.contains("island-out");
+  const r = usable ? pipSlot.getBoundingClientRect() : null;
+  const box = r && r.width > 0 && r.height > 0 ? r : { left: 0, top: 0, width: 0, height: 0 };
+  const key = `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)},${Math.round(box.height)}`;
+  if (key === lastPipKey) return;
+  lastPipKey = key;
+  invoke("pip_set_slot", {
+    x: box.left,
+    y: box.top,
+    width: box.width,
+    height: box.height,
+  }).catch(() => {});
+}
+
+function applyPipDocked(docked) {
+  pipDocked = !!docked;
+  const layout = pipLayout();
+  liquidCard.classList.toggle("pip-docked", pipDocked);
+  liquidCard.classList.toggle("pip-cinema", pipDocked && layout === "cinema");
+  liquidCard.classList.toggle("pip-art", pipDocked && layout === "art");
+  btnPipUndock.classList.toggle("hidden", !pipDocked);
+  if (!pipDocked) liquidCard.classList.remove("pip-drop");
+  applyLyricsPanelDom();
+  updateLyricsChevron();
+  lastPipKey = ""; // the slot moved with the layout: always report it again
+  reportPipSlot();
+}
+
+btnPipUndock.addEventListener("click", (e) => {
+  e.stopPropagation();
+  invoke("pip_undock").catch((err) => console.error("PiP undock error:", err));
+});
 
 // Every size change (morphs, settings, lyrics, stats) reports itself; no manual calls needed
 new ResizeObserver(reportHitRect).observe(liquidCard);
@@ -1725,7 +1781,7 @@ keySelect.addEventListener("change", updateBindBadge);
 
 const settingsTabs = document.getElementById("settingsTabs");
 const settingsHint = document.getElementById("settingsHint");
-const SETTINGS_TAB_ORDER = ["general", "island", "look", "system", "notify"];
+const SETTINGS_TAB_ORDER = ["general", "island", "look", "system", "notify", "video"];
 let settingsTab = "general";
 
 // Slide the pill under the active tab (measured, so labels can have any width)
@@ -1771,7 +1827,10 @@ function makeSegmented(el) {
   Object.defineProperty(el, "value", {
     get: () => current,
     set: (v) => {
-      const match = buttons.find((b) => Number(b.dataset.value) === Number(v));
+      // Text values ("cinema", "hide") match as strings; numeric ones ignore formatting
+      const match =
+        buttons.find((b) => b.dataset.value === String(v)) ||
+        buttons.find((b) => Number(b.dataset.value) === Number(v));
       if (match) current = match.dataset.value;
       paint();
     },
@@ -1787,7 +1846,14 @@ function makeSegmented(el) {
   paint();
 }
 
-[volumeStepSelect, expandDelaySelect, statsIntervalSelect, notifDurationSelect].forEach(makeSegmented);
+[
+  volumeStepSelect,
+  expandDelaySelect,
+  statsIntervalSelect,
+  notifDurationSelect,
+  pipLayoutSelect,
+  pipIslandSelect,
+].forEach(makeSegmented);
 
 // "Teams, Outlook ,, teams" -> ["Teams", "Outlook"]
 function parseIgnoreList(text) {
@@ -1827,10 +1893,19 @@ function updateSettingsDependencies() {
   const island = chkIslandEnabled.checked;
   const stats = chkStatsEnabled.checked;
   const notify = chkNotifEnabled.checked;
+  const pip = chkPipDock.checked;
   settingsPanel.querySelectorAll("[data-dep]").forEach((row) => {
     const dep = row.dataset.dep;
     const enabled =
-      dep === "island" ? island : dep === "no-island" ? !island : dep === "notify" ? notify : stats;
+      dep === "island"
+        ? island
+        : dep === "no-island"
+          ? !island
+          : dep === "notify"
+            ? notify
+            : dep === "pip"
+              ? pip
+              : stats;
     row.classList.toggle("disabled", !enabled);
     row.querySelectorAll("input, button, select").forEach((el) => {
       el.disabled = !enabled;
@@ -2006,6 +2081,10 @@ async function loadConfigUI() {
     chkNotifShowBody.checked = appConfig.notif_show_body !== false;
     notifDurationSelect.value = String(Number(appConfig.notif_duration_ms) || 6000);
     notifIgnoreInput.value = (Array.isArray(appConfig.notif_ignore) ? appConfig.notif_ignore : []).join(", ");
+    chkPipDock.checked = appConfig.pip_dock_enabled !== false;
+    pipLayoutSelect.value = appConfig.pip_layout === "art" ? "art" : "cinema";
+    pipIslandSelect.value = appConfig.pip_island === "float" ? "float" : "hide";
+    applyPipDocked(pipDocked); // the saved layout may have changed
     updateHoverRevealIcon();
     updateSettingsState();
 
@@ -2055,6 +2134,9 @@ function collectConfig() {
     notif_show_body: chkNotifShowBody.checked,
     notif_duration_ms: Number(notifDurationSelect.value) || 6000,
     notif_ignore: parseIgnoreList(notifIgnoreInput.value),
+    pip_dock_enabled: chkPipDock.checked,
+    pip_layout: pipLayoutSelect.value === "art" ? "art" : "cinema",
+    pip_island: pipIslandSelect.value === "float" ? "float" : "hide",
     theme: themePreview,
     accent_from_art: chkAccentFromArt.checked,
     card_opacity: Number(cardOpacityRange.value) || 0.74,
@@ -2070,6 +2152,7 @@ btnSaveConfig.addEventListener("click", async () => {
     await invoke("update_app_config", { newConfig });
     appConfig = newConfig;
     configDirty = false;
+    applyPipDocked(pipDocked); // the video layout may have changed
     clearBindError();
     themeChoice = newConfig.theme;
     themePreview = themeChoice;
@@ -2256,6 +2339,19 @@ async function init() {
     const payload = event.payload || {};
     applyIslandMode(payload.mode);
   });
+
+  // Docked browser video (PiP): state and the drop zone while one is dragged over the card
+  await listen("pip-docked", (event) => {
+    applyPipDocked(event.payload && event.payload.docked);
+  });
+  await listen("pip-drop-hover", (event) => {
+    liquidCard.classList.toggle("pip-drop", !!(event.payload && event.payload.over));
+  });
+  try {
+    applyPipDocked(await invoke("pip_status"));
+  } catch (err) {
+    console.warn("PiP status unavailable:", err);
+  }
 
   // System stats from the backend sampler
   await listen("system-stats", (event) => {

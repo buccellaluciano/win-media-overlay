@@ -12,6 +12,8 @@
     <!-- Dynamic Ambient Glow Projection (two layers cross-fade so colors change gradually) -->
     <div class="ambient-glow" id="ambientGlowA"></div>
     <div class="ambient-glow" id="ambientGlowB"></div>
+    <!-- Shown while a browser PiP window is dragged over the card -->
+    <div class="pip-drop-hint" id="pipDropHint">Soltá para acoplar el video</div>
 
     <!-- Dynamic Island: compact + activity states -->
     <div class="island-compact" id="islandCompact">
@@ -54,6 +56,13 @@
         <button class="header-btn hidden" id="btnLyricsToggle" title="Mostrar u ocultar letras">
           <svg id="iconLyricsChevron" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.2" fill="none">
             <polyline points="6 15 12 9 18 15"></polyline>
+          </svg>
+        </button>
+        <button class="header-btn hidden" id="btnPipUndock" title="Desacoplar el video">
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="13" height="10" rx="2"></rect>
+            <polyline points="14 21 21 21 21 14"></polyline>
+            <line x1="21" y1="21" x2="15" y2="15"></line>
           </svg>
         </button>
         <button class="header-btn" id="btnQuickDrag" title="Permitir arrastrar la ventana">
@@ -107,6 +116,8 @@
 
     <!-- Player Main Section -->
     <main class="player-body" id="playerBody">
+      <!-- Docked browser video: the PiP window is placed over this box by the backend -->
+      <div class="pip-slot" id="pipSlot" aria-hidden="true"></div>
       <!-- Album Artwork -->
       <div class="art-container" id="artContainer">
         <img class="album-art" id="albumArt" src="" alt="Portada del álbum">
@@ -216,6 +227,7 @@
           <button class="settings-tab" data-tab="look" role="tab">Apariencia</button>
           <button class="settings-tab" data-tab="system" role="tab">Sistema</button>
           <button class="settings-tab" data-tab="notify" role="tab">Avisos</button>
+          <button class="settings-tab" data-tab="video" role="tab">Video</button>
         </div>
         <button class="close-settings-btn" id="btnCloseSettings" title="Cerrar ajustes (Esc)">Listo</button>
       </div>
@@ -408,6 +420,31 @@
             <input type="checkbox" id="chkStatsAlerts" class="ios-switch">
             <span class="switch-slider"></span>
           </label>
+        </div>
+
+        <!-- Docked browser video (Picture in Picture) -->
+        <div class="settings-page" data-page="video">
+          <label class="set-row set-row-master">
+            <span class="set-label">Acoplar video de los navegadores <small>Arrastrá la ventana de imagen en imagen sobre la tarjeta</small></span>
+            <input type="checkbox" id="chkPipDock" checked class="ios-switch">
+            <span class="switch-slider"></span>
+          </label>
+
+          <div class="set-row set-row-stack" data-dep="pip">
+            <span class="set-label">Diseño</span>
+            <div class="seg" id="pipLayoutSelect">
+              <button data-value="cinema">Modo cine</button>
+              <button data-value="art">En lugar de la carátula</button>
+            </div>
+          </div>
+
+          <div class="set-row" data-dep="pip">
+            <span class="set-label">Con la isla <small>Qué hace el video al colapsar</small></span>
+            <div class="seg" id="pipIslandSelect">
+              <button data-value="hide">Ocultar</button>
+              <button data-value="float">Flotante</button>
+            </div>
+          </div>
         </div>
 
         <!-- Windows notifications -> quiet toasts -->
