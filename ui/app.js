@@ -34,6 +34,7 @@ const btnHoverReveal = document.getElementById("btnHoverReveal");
 const btnQuickDrag = document.getElementById("btnQuickDrag");
 const btnQuickStats = document.getElementById("btnQuickStats");
 const btnPipUndock = document.getElementById("btnPipUndock");
+const btnQuickIsland = document.getElementById("btnQuickIsland");
 const pipSlot = document.getElementById("pipSlot");
 const chkPipDock = document.getElementById("chkPipDock");
 const pipLayoutSelect = document.getElementById("pipLayoutSelect");
@@ -2005,6 +2006,7 @@ function updateHoverRevealIcon() {
   btnHoverReveal.classList.toggle("active", on);
   btnQuickDrag.classList.toggle("active", !!(appConfig && appConfig.draggable !== false));
   btnQuickStats.classList.toggle("active", !!(appConfig && appConfig.stats_enabled));
+  btnQuickIsland.classList.toggle("active", !!(appConfig && appConfig.island_enabled !== false));
 }
 
 // Flip one saved flag right away; the matching settings switch (if any) follows
@@ -2032,6 +2034,12 @@ btnHoverReveal.addEventListener("click", (e) => {
 btnQuickDrag.addEventListener("click", (e) => {
   e.stopPropagation();
   void quickToggle("draggable", chkDraggable, applyDraggable);
+});
+
+// Dynamic Island on/off without opening Ajustes (the backend switches the mode right away)
+btnQuickIsland.addEventListener("click", (e) => {
+  e.stopPropagation();
+  void quickToggle("island_enabled", chkIslandEnabled, null);
 });
 
 btnQuickStats.addEventListener("click", (e) => {
