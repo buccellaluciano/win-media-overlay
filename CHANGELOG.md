@@ -2,6 +2,19 @@
 
 Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 
+## [Sin publicar]
+
+### Mejorado
+
+- **Letras para videos:** los títulos de YouTube y similares ("Michael Jackson - Smooth Criminal (Official Video)" del canal "michaeljacksonVEVO") no coincidían con nada en LRCLIB. Nuevo `ui/lyrics-query.js`: quita etiquetas de subida (Official Video, Lyrics/Letra, HD/4K, Remastered, feat.…), separa "Artista - Canción" (también "Canción - Artista"), descarta lo que sigue a " | " y limpia el canal (VEVO, " - Topic", Official). Se busca primero lo que informa el reproductor y después hasta dos variantes limpias; entre los resultados se prefiere el de duración más cercana.
+
+### Corregido
+
+- Elegir solo un tema no activaba el botón Guardar.
+- Al cambiar de fuente, la barra de volumen podía seguir controlando la app anterior durante 1,5 s.
+- El video acoplado se desacoplaba solo cuando el navegador corría su ventana, tironeaba si se lo arrastraba entre dos chequeos y desaparecía al soltarlo sobre la isla colapsada.
+- Si otra app había tomado el atajo global, ningún ajuste se podía guardar; los botones rápidos ahora vuelven a su estado si el guardado falla.
+
 ## [1.0.1] — 2026-11-10
 
 ### Corregido

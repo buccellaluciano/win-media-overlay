@@ -369,29 +369,35 @@ async function readJsonCapped(res) {
 
 async function fetchLyrics(state) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
-  const params = new URLSearchParams({
-    track_name: state.title || "",
-    artist_name: state.artist || "",
-    album_name: state.album || "",
-    duration: String(Math.round(state.duration_sec || 0)),
-  });
+  // One budget for the whole lookup (up to 4 small requests)
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const duration = Math.round(state.duration_sec || 0);
+  // What the player reported first, then cleaned-up guesses: video uploads report
+  // "Artist - Song (Official Video)" by "artistVEVO", which LRCLIB never matches (lyrics-query.js)
+  const queries = lyricsQueries(state.title, state.artist, state.album);
   try {
+    // 1) Exact match on the reported metadata (right timing when it hits)
+    const params = new URLSearchParams({
+      track_name: state.title || "",
+      artist_name: state.artist || "",
+      album_name: state.album || "",
+      duration: String(duration),
+    });
     const res = await fetch(`https://lrclib.net/api/get?${params}`, { signal: controller.signal });
     if (res.ok) {
       const data = await readJsonCapped(res);
-      return data && data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
+      if (data && data.syncedLyrics) return parseLrc(data.syncedLyrics);
     }
-    // Fallback: fuzzy search
-    const q = new URLSearchParams({
-      track_name: state.title || "",
-      artist_name: state.artist || "",
-    });
-    const arr = await readJsonCapped(
-      await fetch(`https://lrclib.net/api/search?${q}`, { signal: controller.signal })
-    );
-    const hit = Array.isArray(arr) ? arr.find((r) => r && r.syncedLyrics) : null;
-    return hit ? parseLrc(hit.syncedLyrics) : null;
+    // 2) Fuzzy search, reported metadata first and then each cleaned variant
+    for (const q of queries) {
+      const sp = new URLSearchParams({ track_name: q.track, artist_name: q.artist });
+      const arr = await readJsonCapped(
+        await fetch(`https://lrclib.net/api/search?${sp}`, { signal: controller.signal })
+      );
+      const hit = pickLyricsHit(arr, duration);
+      if (hit) return parseLrc(hit.syncedLyrics);
+    }
+    return null;
   } finally {
     clearTimeout(timeout);
   }

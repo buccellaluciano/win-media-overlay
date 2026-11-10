@@ -35,7 +35,7 @@ La ventana no es una tarjeta fija: es una cápsula que **se transforma** entre e
 - **Heurística de selección de fuente**: puntúa cada sesión (reproduciendo, sesión mostrada, título/duración, sesión actual de Windows) y descarta anuncios/previews recién aparecidos o sonidos muy cortos. Si la fuente mostrada se pausa y otra empieza a sonar, cambia en ~1,5 s; si nadie suena, se queda la mostrada.
 - **Selección manual** desde el popover de fuentes (incluye “Automático (Windows 11)”), estable aunque cambie el orden de las sesiones o se abran/cierren pestañas.
 - **Volumen por aplicación** (WASAPI): cada app conserva su nivel; se re-aplica al cambiar de pista o hacer seek. Si no hay sesión de audio, usa el volumen del sistema.
-- **Letras sincronizadas (opt-in)**: fuente pública **LRCLIB**; se envían solo título, artista, álbum y duración. Timeout de 6 s y caché acotada.
+- **Letras sincronizadas (opt-in)**: fuente pública **LRCLIB**; se envían solo título, artista, álbum y duración. Si el título viene de un video ("Artista - Canción (Official Video)" subido por "artistaVEVO"), se limpia de etiquetas y se separa artista y canción antes de buscar. Timeout de 8 s y caché acotada.
 
 ### Estadísticas del sistema (opt-in)
 
@@ -157,11 +157,13 @@ Compilación y verificación **siempre offline**:
 cargo build --release --offline
 cargo clippy --offline
 cargo test --offline
+node tests/lyrics-query.test.js
 ```
 
 Tests incluidos:
 - `media::tests::*`: heurística de selección de fuente.
 - `sysstats::tests::samples`: lectura real de CPU/RAM/GPU/red/disco.
+- `tests/lyrics-query.test.js`: limpieza de títulos de video para buscar letras (Node).
 
 No se descargan crates, paquetes ni recursos externos. Las features nuevas del crate `windows` ya están en `Cargo.lock`.
 
@@ -198,6 +200,7 @@ wmo/
     ├── index.html      # Isla compacta/activity, reproductor, letras y ajustes
     ├── style.css       # Tokens + 9 temas (Liquid, Frost, OLED, Mica, Neón…)
     ├── app.js          # Lógica frontend, morph de la isla, stats y temas
+    ├── lyrics-query.js # Limpia títulos de video para buscar letras ("(Official Video)", VEVO…)
     ├── notify.html     # Ventana de avisos (arriba a la derecha, nunca toma el foco)
     ├── notify.css      # Estilo de los avisos (reusa los tokens de tema)
     └── notify.js       # Pila de avisos, temporizadores y tamaño de la ventana
