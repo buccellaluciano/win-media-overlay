@@ -281,7 +281,7 @@ fn update_app_config(
     // Same clamps as a config loaded from disk (the UI is not trusted to send sane values)
     new_config.normalize();
 
-    let (island_was_enabled, hotkey_changed) = {
+    let (island_was_enabled, hover_was_enabled, hotkey_changed) = {
         let old = state.config.lock().unwrap_or_else(|e| e.into_inner());
         let same_mods = {
             let norm = |v: &[String]| {
@@ -293,6 +293,7 @@ fn update_app_config(
         };
         (
             old.island_enabled,
+            old.hover_reveal,
             !same_mods || !old.hotkey_key.eq_ignore_ascii_case(&new_config.hotkey_key),
         )
     };
@@ -308,13 +309,18 @@ fn update_app_config(
 
     save_config(&new_config)?;
 
-    // Apply new position
-    let _ = apply_window_position(
-        &window,
-        &new_config.position_preset,
-        new_config.custom_x,
-        new_config.custom_y,
-    );
+    // Back to top-center only when a top-center mode was just turned on. Any other change
+    // (a switch, a theme, a quick toggle) leaves the window where the user dragged it.
+    let recenter = (new_config.island_enabled && !island_was_enabled)
+        || (new_config.hover_reveal && !hover_was_enabled);
+    if recenter {
+        let _ = apply_window_position(
+            &window,
+            &new_config.position_preset,
+            new_config.custom_x,
+            new_config.custom_y,
+        );
+    }
 
     // Topmost is managed by the fullscreen watcher; re-assert it unless a game is fullscreen
     let fullscreen = state.fullscreen_active.load(Ordering::Relaxed);
@@ -421,7 +427,11 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         // Activating the overlay over an exclusive-fullscreen game minimizes it
         let no_activate = conf.respect_fullscreen && fullscreen;
 
-        let _ = apply_window_position(&win, &conf.position_preset, conf.custom_x, conf.custom_y);
+        // Classic mode (no island): reappear where the user left it. Only hover-reveal lives
+        // at the top edge and needs the window back there.
+        if conf.hover_reveal {
+            let _ = apply_window_position(&win, &conf.position_preset, conf.custom_x, conf.custom_y);
+        }
         if no_activate {
             // Show without stealing focus and without topmost (Windows won't draw it over D3D)
             let _ = win.set_always_on_top(false);

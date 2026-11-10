@@ -14,6 +14,7 @@ Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 - Al cambiar de fuente, la barra de volumen podía seguir controlando la app anterior durante 1,5 s.
 - El video acoplado se desacoplaba solo cuando el navegador corría su ventana, tironeaba si se lo arrastraba entre dos chequeos y desaparecía al soltarlo sobre la isla colapsada.
 - Si otra app había tomado el atajo global, ningún ajuste se podía guardar; los botones rápidos ahora vuelven a su estado si el guardado falla.
+- Cambiar cualquier ajuste (o un botón rápido) devolvía la ventana arriba al centro. Ahora solo vuelve ahí al activar la isla o "Mostrar al pasar el ratón"; sin ellos, la app también reaparece donde la dejaste al mostrarla con el atajo o la bandeja.
 
 ## [1.0.1] — 2026-11-10
 
