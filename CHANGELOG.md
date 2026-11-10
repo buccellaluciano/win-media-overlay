@@ -2,7 +2,7 @@
 
 Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 
-## [Sin publicar]
+## [1.1.0] — 2026-11-10
 
 ### Mejorado
 

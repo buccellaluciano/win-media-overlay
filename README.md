@@ -4,7 +4,7 @@ Una **isla dinámica** flotante, elegante y ultraligera para controlar la reprod
 
 Construida con **Tauri 2 + Rust + HTML/CSS/JS vanilla**, compilada **100 % offline** con las librerías locales del equipo. Sin frameworks JS, sin npm, sin CDNs.
 
-**Versión 1.0.1.**
+**Versión 1.1.0.**
 
 ---
 
@@ -91,7 +91,7 @@ Arrastrá la ventana *imagen en imagen* de Chrome, Edge, Brave o Firefox y solta
 
 ## 🚀 Cómo ejecutarlo
 
-**Versión portable (recomendada):** descargá `WMO-1.0.1-win64.zip` desde *Releases*, descomprimilo y hacé doble clic en `Iniciar.bat` (o en `wmo.exe`). No requiere instalación.
+**Versión portable (recomendada):** descargá `WMO-1.1.0-win64.zip` desde *Releases*, descomprimilo y hacé doble clic en `Iniciar.bat` (o en `wmo.exe`). No requiere instalación.
 
 **Desde el código fuente** (después de `cargo build --release --offline`):
 
