@@ -92,13 +92,34 @@ fn shown_aumid() -> Option<String> {
     SHOWN_STATE.lock().ok().and_then(|g| g.as_ref().map(|(k, _, _)| k.clone()))
 }
 
+// AUMID of the manually picked source (its id without the "##idx" duplicate tiebreaker)
+fn manual_aumid() -> Option<String> {
+    SELECTED_SOURCE.lock().ok().and_then(|g| {
+        g.as_ref()
+            .map(|s| s.id.split("##").next().unwrap_or(&s.id).to_string())
+    })
+}
+
 // Hold the previously shown state while a different session is only transiently reported.
 // Any key change (including "no session") must persist for the hold window to commit.
 fn stabilize(state: MediaState) -> MediaState {
     let key = state.source_app_id.clone();
+    // Read before locking SHOWN_STATE (select_source takes the two locks in this order)
+    let manual = manual_aumid();
     let Ok(mut g) = SHOWN_STATE.lock() else {
         return state;
     };
+    // A manual pick commits at once. A different key while a pick is active is a poll that
+    // started before the switch: it must not latch, or the volume bar (which follows the shown
+    // source) would drive the previous app until the hold window let the new one in.
+    match manual.as_deref() {
+        Some(m) if m == key => {
+            *g = Some((key, state.clone(), None));
+            return state;
+        }
+        Some(_) if g.is_none() => return state,
+        _ => {}
+    }
     let Some((shown_key, shown_state, pending)) = g.as_mut() else {
         *g = Some((key, state.clone(), None));
         return state;

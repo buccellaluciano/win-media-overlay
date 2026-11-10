@@ -1980,6 +1980,9 @@ themeSwatches.forEach((btn) => {
     e.stopPropagation();
     themePreview = btn.dataset.theme;
     applyTheme(themePreview);
+    // stopPropagation keeps this click from reaching the sheet's listener that refreshes the
+    // Save button, so refresh it here (otherwise a theme alone never enabled Save)
+    updateSettingsState();
   });
 });
 
@@ -2013,16 +2016,22 @@ function updateHoverRevealIcon() {
 // so an open sheet doesn't report it as an unsaved change.
 async function quickToggle(key, checkbox, apply) {
   if (!appConfig) return;
+  const before = appConfig[key];
   const on = key === "draggable" ? appConfig.draggable === false : !appConfig[key];
-  appConfig[key] = on;
-  if (checkbox) checkbox.checked = on;
-  updateHoverRevealIcon();
-  if (apply) apply(on);
-  updateSettingsState();
+  const setUi = (value) => {
+    appConfig[key] = value;
+    if (checkbox) checkbox.checked = value !== false;
+    updateHoverRevealIcon();
+    if (apply) apply(value !== false);
+    updateSettingsState();
+  };
+  setUi(on);
   try {
     await invoke("update_app_config", { newConfig: appConfig });
   } catch (err) {
+    // Not saved: don't leave the icon/switch showing a state the app doesn't have
     console.error(`Save ${key} error:`, err);
+    setUi(before);
   }
 }
 

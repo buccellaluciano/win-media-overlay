@@ -401,6 +401,13 @@ fn apply(ctx: &Ctx, st: &mut Pip) -> Option<Event> {
     if st.user_moving {
         return None;
     }
+    // The user grabbed the video between two ticks: a sync from elsewhere (slot report, window
+    // move) must not snap it back mid-drag
+    if !st.hidden_by_us && in_move_size(st.hwnd) {
+        st.user_moving = true;
+        st.still_ticks = 0;
+        return None;
+    }
     let expanded = ctx.visible && ctx.mode == IslandMode::Expanded;
     let collapsed =
         ctx.visible && matches!(ctx.mode, IslandMode::Compact | IslandMode::Activity);
@@ -493,8 +500,20 @@ fn tick(ctx: &Ctx, st: &mut Pip) -> (Vec<Event>, bool) {
             .target_at
             .map(|t| t.elapsed() > Duration::from_millis(400))
             .unwrap_or(true);
+        // A displaced window only counts as a user drag (one too quick for a tick to see the
+        // move loop) with the cursor on it: the browser also nudges it on its own (PiP aspect or
+        // minimum size, DPI change between monitors) and that used to undock it by itself
+        let cursor_on_pip = {
+            let mut c = POINT::default();
+            unsafe { GetCursorPos(&mut c) }.is_ok()
+                && c.x >= cur.left
+                && c.x < cur.right
+                && c.y >= cur.top
+                && c.y < cur.bottom
+        };
         let moved_by_user = in_move_size(st.hwnd)
             || (ours_settled
+                && cursor_on_pip
                 && st
                     .target
                     .map(|t| (cur.left - t.left).abs() > 2 || (cur.top - t.top).abs() > 2)
@@ -507,6 +526,11 @@ fn tick(ctx: &Ctx, st: &mut Pip) -> (Vec<Event>, bool) {
                 st.still_ticks = 0;
                 if ctx.cursor_on_card() {
                     st.target = None; // snap back into the slot
+                    // Dropped on the collapsed island (the cursor left the card while dragging):
+                    // expand it, or "hide" would make the video vanish instead of re-docking
+                    if ctx.mode != IslandMode::Expanded {
+                        events.push(Event::Expand);
+                    }
                 } else {
                     // Undocked where it was dropped, with its original size back
                     let (w, hgt) = (st.orig.right - st.orig.left, st.orig.bottom - st.orig.top);

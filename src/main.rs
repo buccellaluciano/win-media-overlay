@@ -281,12 +281,30 @@ fn update_app_config(
     // Same clamps as a config loaded from disk (the UI is not trusted to send sane values)
     new_config.normalize();
 
-    // Register the hotkey first: if another app owns it, nothing is persisted and the UI can revert
-    if let Some(mgr) = state.hotkey_mgr.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        mgr.update_hotkey(new_config.hotkey_modifiers.clone(), new_config.hotkey_key.clone())?;
-    }
+    let (island_was_enabled, hotkey_changed) = {
+        let old = state.config.lock().unwrap_or_else(|e| e.into_inner());
+        let same_mods = {
+            let norm = |v: &[String]| {
+                let mut v: Vec<String> = v.iter().map(|m| m.to_lowercase()).collect();
+                v.sort();
+                v
+            };
+            norm(&old.hotkey_modifiers) == norm(&new_config.hotkey_modifiers)
+        };
+        (
+            old.island_enabled,
+            !same_mods || !old.hotkey_key.eq_ignore_ascii_case(&new_config.hotkey_key),
+        )
+    };
 
-    let island_was_enabled = state.config.lock().unwrap_or_else(|e| e.into_inner()).island_enabled;
+    // Register the hotkey first: if another app owns it, nothing is persisted and the UI can
+    // revert. Only when it changed: if another app took the bind since startup, every save
+    // (even a header quick toggle) used to fail with "ya está en uso"
+    if hotkey_changed {
+        if let Some(mgr) = state.hotkey_mgr.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            mgr.update_hotkey(new_config.hotkey_modifiers.clone(), new_config.hotkey_key.clone())?;
+        }
+    }
 
     save_config(&new_config)?;
 
