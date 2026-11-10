@@ -2384,7 +2384,8 @@ label.set-row:active .ios-switch:checked + .switch-slider::after {
 }
 
 /* Art: video in place of the artwork, at Chrome's minimum PiP size */
-.liquid-card.pip-docked.pip-art .player-body {
+/* :not(.settings-open): this display must not beat the rule that hides the player under Ajustes */
+.liquid-card.pip-docked.pip-art:not(.settings-open) .player-body {
   display: grid;
   /* --pip-art-w/h: size the browser really keeps (reported by the backend), 260x146 until then */
   grid-template-columns: var(--pip-art-w, 260px) minmax(0, 1fr);
