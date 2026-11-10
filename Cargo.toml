@@ -2,6 +2,9 @@
 name = "wmo"
 version = "1.0.0"
 edition = "2021"
+description = "Isla dinámica flotante para controlar la música en Windows 11 (Tauri 2 + Rust)"
+license = "MIT"
+repository = "https://github.com/buccellaluciano/win-media-overlay"
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }

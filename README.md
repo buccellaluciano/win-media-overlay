@@ -175,6 +175,7 @@ wmo/
 ├── Cargo.lock          # Versiones exactas (compilación offline)
 ├── build.rs            # Script de compilación de Tauri
 ├── tauri.conf.json     # Ventana, CSP estricta y metadatos del bundle
+├── LICENSE             # Licencia MIT
 ├── CHANGELOG.md        # Historial de cambios
 ├── PIP_DOCK.md         # Diseño del video acoplado (PiP)
 ├── packaging/          # Iniciar.bat y LEEME.txt del zip de la release
@@ -201,3 +202,9 @@ wmo/
     ├── notify.css      # Estilo de los avisos (reusa los tokens de tema)
     └── notify.js       # Pila de avisos, temporizadores y tamaño de la ventana
 ```
+
+---
+
+## 📄 Licencia
+
+[MIT](LICENSE) © 2026 buccellaluciano.

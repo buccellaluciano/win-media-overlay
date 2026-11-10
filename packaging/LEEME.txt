@@ -65,3 +65,7 @@ Requisitos
 Nota: el ejecutable no esta firmado, asi que Windows SmartScreen puede
 mostrar un aviso la primera vez ("Mas informacion" > "Ejecutar de todas
 formas").
+
+Licencia
+--------
+MIT. Ver el archivo LICENSE incluido en este zip.
