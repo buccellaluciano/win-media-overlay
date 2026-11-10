@@ -58,6 +58,16 @@ Deja Windows en **No molestar** y entérate igual: WMO muestra una copia **silen
 - No se muestran mientras hay un juego en pantalla completa exclusiva.
 - Limitaciones: solo notificaciones que pasan por el sistema de Windows; los botones de la notificación original (p. ej. *Responder*) no se pueden usar desde el aviso.
 
+### Video acoplado (PiP del navegador)
+
+Arrastrá la ventana *imagen en imagen* de Chrome, Edge, Brave o Firefox y soltala sobre la tarjeta: el video queda **acoplado** dentro del reproductor y lo sigue cuando movés la app.
+
+- Es la **ventana real del navegador**, no una captura: no consume más, funciona con DRM (Netflix…) y sus controles siguen andando.
+- Dos diseños: **Modo cine** (16:9 a todo el ancho, con una barra mínima de título y controles debajo) o **En lugar de la carátula** (260 × 146, ideal para videos musicales).
+- Con la isla colapsada el video se **oculta** o queda **flotando** debajo de la isla.
+- Para desacoplar: arrastralo fuera de la tarjeta (recupera su tamaño) o usá el botón del encabezado. Al salir desde la bandeja vuelve a su lugar.
+- Se configura en *Ajustes › Video*.
+
 ### Temas y apariencia
 
 - **9 temas** con previsualización inmediata y guardado al confirmar:
@@ -122,7 +132,7 @@ WMO está pensado para convivir con juegos que usan **EAC, BattlEye, Vanguard o 
 - ❌ **No usa WMI** en bucles ni crea servicios/tareas programadas.
 - 🌐 **Única conexión de red**: `https://lrclib.net`, solo si activas las letras (opt-in). Se envían título, artista, álbum y duración.
 
-Lo que **sí** usa son APIs públicas de Windows en modo usuario: GSMTC, WASAPI, PDH, `GetSystemTimes`, `GlobalMemoryStatusEx`, `GetIfTable2`, `RegisterHotKey`, `GetCursorPos`, `UserNotificationListener` (solo con los avisos activados) y, opcionalmente, `nvml.dll` si el driver de NVIDIA ya la instaló.
+Lo que **sí** usa son APIs públicas de Windows en modo usuario: GSMTC, WASAPI, PDH, `GetSystemTimes`, `GlobalMemoryStatusEx`, `GetIfTable2`, `RegisterHotKey`, `GetCursorPos`, `UserNotificationListener` (solo con los avisos activados), `EnumWindows` + `SetWindowPos`/`ShowWindowAsync` **solo sobre la ventana PiP del navegador** para el video acoplado (enumera ventanas, no procesos; sin hooks ni `SetParent`) y, opcionalmente, `nvml.dll` si el driver de NVIDIA ya la instaló.
 
 **Limitación de fullscreen exclusivo**: Windows no permite dibujar un overlay encima de una app D3D exclusiva sin minimizarla. En ese caso la isla se oculta y el atajo la muestra sin foco, pero puede quedar detrás. Para verla siempre, usa **pantalla completa sin bordes** en el juego.
 
@@ -173,6 +183,7 @@ wmo/
 │   ├── volume.rs       # Volumen maestro del sistema (IAudioEndpointVolume)
 │   ├── sysstats.rs     # Muestreador de CPU/RAM/GPU/VRAM/red/disco y NVML opcional
 │   ├── notifications.rs# Avisos: lee el centro de notificaciones y muestra copias silenciosas
+│   ├── pip.rs          # Video acoplado: detecta la ventana PiP del navegador y la ubica en la tarjeta
 │   ├── fullscreen.rs   # Detección de fullscreen exclusivo (D3D) en primer plano
 │   ├── hotkey.rs       # RegisterHotKey con hilo propio y mensajes bloqueantes
 │   ├── position.rs     # Posicionado top-center por monitor y DPI

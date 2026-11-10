@@ -2,6 +2,16 @@
 
 Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 
+## [Sin publicar]
+
+### Video acoplado (PiP del navegador)
+
+- Nuevo `src/pip.rs`: detecta la ventana *Picture in Picture* de Chrome/Edge/Brave/Firefox con `EnumWindows` (clase, `WS_EX_TOPMOST` y título, excluyendo las ventanas propias) y reconoce el arrastre con `GetGUIThreadInfo` (`GUI_INMOVESIZE`) o el cambio de rect, sin hooks ni `GetAsyncKeyState`.
+- Al soltarla sobre la tarjeta se acopla: `SetWindowPos` async al hueco, la sigue en `WindowEvent::Moved`, se mantiene encima de la ventana principal y se restaura su rect original al desacoplar, al apagar la opción o al salir desde la bandeja.
+- Con la isla colapsada se oculta (`"hide"`) o flota 320 × 180 debajo de la isla (`"float"`). También se oculta mientras Ajustes o el selector de fuentes tapan el reproductor.
+- Comandos `pip_set_slot`, `pip_undock` y `pip_status`; eventos `pip-docked` y `pip-drop-hover`. El hilo duerme con la opción apagada o con la ventana oculta y sin video.
+- Frontend: diseños `cinema` y `art`, zona para soltar, botón para desacoplar y pestaña *Video* en Ajustes. Las opciones `pip_*` ya se guardan. Las letras se ocultan en modo cine.
+
 ## [0.2.0] — 2026-10-27
 
 ### Fase 1 — Corrección de bugs (`9a0b732`)
