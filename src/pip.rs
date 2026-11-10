@@ -59,6 +59,8 @@ struct Pip {
     user_moving: bool,
     still_ticks: u32,
     last_rect: RECT,
+    // Real size the browser kept (its PiP minimum is bigger than what we ask for), physical px
+    reported_size: Option<(i32, i32)>,
     // Undocked candidate being dragged towards the card
     cand: isize,
     cand_rect: RECT,
@@ -81,9 +83,17 @@ struct HoverPayload {
     over: bool,
 }
 
+// Size the docked window really has, CSS px
+#[derive(Clone, serde::Serialize)]
+struct SizePayload {
+    width: f64,
+    height: f64,
+}
+
 enum Event {
     Docked(bool),
     Hover(bool),
+    Size(f64, f64),
     Expand,
 }
 
@@ -119,6 +129,7 @@ pub fn spawn(app: tauri::AppHandle) {
 struct Ctx {
     enabled: bool,
     float: bool,
+    art: bool,
     mode: IslandMode,
     visible: bool,
     origin: POINT, // client origin of the main window, physical px
@@ -129,9 +140,9 @@ struct Ctx {
 
 fn read_ctx(app: &tauri::AppHandle) -> Ctx {
     let state = app.state::<AppState>();
-    let (enabled, float) = {
+    let (enabled, float, art) = {
         let c = state.config.lock().unwrap_or_else(|e| e.into_inner());
-        (c.pip_dock_enabled, c.pip_island == "float")
+        (c.pip_dock_enabled, c.pip_island == "float", c.pip_layout == "art")
     };
     let mode = *state.island_mode.lock().unwrap_or_else(|e| e.into_inner());
     let hit = state
@@ -152,7 +163,7 @@ fn read_ctx(app: &tauri::AppHandle) -> Ctx {
             }
         }
     }
-    Ctx { enabled, float, mode, visible, origin, scale, hit, main }
+    Ctx { enabled, float, art, mode, visible, origin, scale, hit, main }
 }
 
 impl Ctx {
@@ -374,6 +385,7 @@ fn clear_dock(st: &mut Pip) {
     st.target_at = None;
     st.user_moving = false;
     st.still_ticks = 0;
+    st.reported_size = None;
 }
 
 // Apply the docked window's place for the current mode. Cheap; safe from any thread.
@@ -425,6 +437,9 @@ fn emit(app: &tauri::AppHandle, ev: Option<Event>) {
         Some(Event::Hover(o)) => {
             let _ = app.emit("pip-drop-hover", HoverPayload { over: o });
         }
+        Some(Event::Size(w, hgt)) => {
+            let _ = app.emit("pip-size", SizePayload { width: w, height: hgt });
+        }
         Some(Event::Expand) => crate::set_island_mode_internal(app, IslandMode::Expanded, false),
         None => {}
     }
@@ -461,6 +476,7 @@ fn dock(st: &mut Pip, hwnd: isize) {
     st.target_at = None;
     st.user_moving = false;
     st.still_ticks = 0;
+    st.reported_size = None;
 }
 
 // One 100 ms step. Returns events to emit and whether something needs fast ticks.
@@ -511,6 +527,18 @@ fn tick(ctx: &Ctx, st: &mut Pip) -> (Vec<Event>, bool) {
         } else if moved_by_user {
             st.user_moving = true;
             st.still_ticks = 0;
+        } else if ours_settled && ctx.art && ctx.visible && ctx.mode == IslandMode::Expanded {
+            // The art slot follows the size the browser really kept (its PiP minimum): tell
+            // the UI once, it resizes the slot and the next target matches the window
+            if let Some(t) = st.target {
+                let (tw, th) = (t.right - t.left, t.bottom - t.top);
+                let (cw, ch) = (cur.right - cur.left, cur.bottom - cur.top);
+                let clamped = (cw - tw).abs() > 2 || (ch - th).abs() > 2;
+                if clamped && cw > 0 && ch > 0 && st.reported_size != Some((cw, ch)) {
+                    st.reported_size = Some((cw, ch));
+                    events.push(Event::Size(cw as f64 / ctx.scale, ch as f64 / ctx.scale));
+                }
+            }
         }
         st.last_rect = cur;
     }

@@ -486,10 +486,33 @@ function applyPipDocked(docked) {
   liquidCard.classList.toggle("pip-cinema", pipDocked && layout === "cinema");
   liquidCard.classList.toggle("pip-art", pipDocked && layout === "art");
   btnPipUndock.classList.toggle("hidden", !pipDocked);
-  if (!pipDocked) liquidCard.classList.remove("pip-drop");
+  if (!pipDocked) {
+    liquidCard.classList.remove("pip-drop");
+    setPipArtSize(null); // the next video measures again
+  }
   applyLyricsPanelDom();
   updateLyricsChevron();
   lastPipKey = ""; // the slot moved with the layout: always report it again
+  reportPipSlot();
+}
+
+// Art layout: the browser keeps its own PiP minimum (bigger than 260x146 on some setups), so
+// the slot takes the size the backend measured on the real window
+const PIP_SLOT_MAX_W = 438; // card content width in a 480 px window
+
+function setPipArtSize(size) {
+  if (!size || !(size.width > 0) || !(size.height > 0)) {
+    liquidCard.style.removeProperty("--pip-art-w");
+    liquidCard.style.removeProperty("--pip-art-h");
+    liquidCard.classList.remove("pip-art-wide");
+  } else {
+    const w = Math.min(Math.round(size.width), PIP_SLOT_MAX_W);
+    const h = Math.round(size.height);
+    liquidCard.style.setProperty("--pip-art-w", `${w}px`);
+    liquidCard.style.setProperty("--pip-art-h", `${h}px`);
+    liquidCard.classList.toggle("pip-art-wide", w > 300);
+  }
+  lastPipKey = "";
   reportPipSlot();
 }
 
@@ -2347,6 +2370,9 @@ async function init() {
   // Docked browser video (PiP): state and the drop zone while one is dragged over the card
   await listen("pip-docked", (event) => {
     applyPipDocked(event.payload && event.payload.docked);
+  });
+  await listen("pip-size", (event) => {
+    setPipArtSize(event.payload);
   });
   await listen("pip-drop-hover", (event) => {
     liquidCard.classList.toggle("pip-drop", !!(event.payload && event.payload.over));

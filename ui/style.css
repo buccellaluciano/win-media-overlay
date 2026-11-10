@@ -2386,7 +2386,8 @@ label.set-row:active .ios-switch:checked + .switch-slider::after {
 /* Art: video in place of the artwork, at Chrome's minimum PiP size */
 .liquid-card.pip-docked.pip-art .player-body {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  /* --pip-art-w/h: size the browser really keeps (reported by the backend), 260x146 until then */
+  grid-template-columns: var(--pip-art-w, 260px) minmax(0, 1fr);
   column-gap: 12px;
   row-gap: 6px;
   align-items: center;
@@ -2395,8 +2396,8 @@ label.set-row:active .ios-switch:checked + .switch-slider::after {
 .liquid-card.pip-docked.pip-art .pip-slot {
   grid-column: 1;
   grid-row: 1;
-  width: 260px;
-  height: 146px;
+  width: var(--pip-art-w, 260px);
+  height: var(--pip-art-h, 146px);
 }
 
 .liquid-card.pip-docked.pip-art .content-container {
@@ -2441,4 +2442,22 @@ label.set-row:active .ios-switch:checked + .switch-slider::after {
 
 .liquid-card.pip-drop .pip-drop-hint {
   opacity: 1;
+}
+
+/* Art slot wider than ~300 px (browser minimum on high DPI): no room for the title beside
+   it, so the title goes under the video */
+.liquid-card.pip-docked.pip-art.pip-art-wide .player-body {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+
+.liquid-card.pip-docked.pip-art.pip-art-wide .metadata-wrapper {
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
+}
+
+.liquid-card.pip-docked.pip-art.pip-art-wide .timeline-container,
+.liquid-card.pip-docked.pip-art.pip-art-wide .actions-row {
+  width: 100%;
 }
