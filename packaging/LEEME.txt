@@ -1,0 +1,67 @@
+WMO - Win11 Media Overlay 1.0.0
+===============================
+
+Ejecutar
+--------
+Doble clic en "Iniciar.bat" (o directamente en wmo.exe). Es portable:
+no requiere instalacion.
+
+Atajo global por defecto: Ctrl + Shift + Espacio (mostrar / ocultar).
+La configuracion se guarda en %APPDATA%\WMO\config.json
+y los registros de errores en %APPDATA%\WMO\logs\.
+
+Bandeja del sistema
+-------------------
+- Clic izquierdo en el icono: mostrar / ocultar.
+- Clic derecho: "Mostrar / Ocultar" y "Salir".
+- Usa "Salir" para cerrar la aplicacion por completo (la X solo la
+  oculta y la deja corriendo en segundo plano).
+
+Isla dinamica
+-------------
+- La app vive arriba al centro como una pildora compacta que se expande
+  al pasar el raton y muestra avisos breves (cambio de pista, volumen).
+- Se activa o desactiva desde el boton del encabezado o en Ajustes > Isla.
+
+Botones del encabezado
+----------------------
+Isla dinamica, arrastrar la ventana, estadisticas del sistema, mostrar
+al pasar el raton, ajustes y ocultar. Aparecen ademas el de letras
+(si la pista tiene letra) y el de desacoplar video (si hay uno acoplado).
+
+Video acoplado (imagen en imagen)
+---------------------------------
+- Activa "imagen en imagen" en un video de Chrome, Edge, Brave o Firefox
+  y arrastra esa ventanita sobre la tarjeta de WMO: queda acoplada.
+- Disenos: "Modo cine" (a todo el ancho) o "En lugar de la caratula".
+- Con la isla colapsada el video se oculta o queda flotando debajo.
+- Para desacoplar: arrastralo fuera de la tarjeta o usa el boton del
+  encabezado. Al salir desde la bandeja vuelve a su lugar.
+- Se configura en Ajustes > Video.
+
+Opcionales (desactivados por defecto)
+-------------------------------------
+- Estadisticas del sistema: CPU, GPU, RAM, VRAM, red y disco.
+- Letras sincronizadas (LRCLIB): requiere internet. Solo se envian
+  titulo, artista, album y duracion de la pista.
+- Avisos: copia silenciosa de las notificaciones de Windows, para usar
+  con "No molestar". Requiere el permiso de Windows en Configuracion >
+  Privacidad y seguridad > Notificaciones.
+
+Juegos y anticheat
+------------------
+- No simula teclado ni raton, no usa hooks globales, no lee la memoria
+  de otros procesos y no carga drivers.
+- "Respetar pantalla completa" (activado por defecto): la app se aparta
+  sola cuando hay un juego en pantalla completa exclusiva. Para verla
+  siempre, usa "pantalla completa sin bordes" en el juego.
+
+Requisitos
+----------
+- Windows 11 de 64 bits.
+- WebView2 Runtime (viene preinstalado en Windows 11). Si la app no abre,
+  instala "Microsoft Edge WebView2 Runtime" desde Microsoft.
+
+Nota: el ejecutable no esta firmado, asi que Windows SmartScreen puede
+mostrar un aviso la primera vez ("Mas informacion" > "Ejecutar de todas
+formas").

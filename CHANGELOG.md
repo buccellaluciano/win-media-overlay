@@ -2,7 +2,21 @@
 
 Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 
-## [Sin publicar]
+## [1.0.0] — 2026-11-10
+
+Primera versión estable. Incluye todo lo de 0.2.0 más lo siguiente.
+
+### Isla dinámica y encabezado
+
+- Ventana fija de 480 × 460: solo la tarjeta se transforma, sin el salto lateral al pasar a la isla.
+- Botones rápidos en el encabezado: activar/desactivar la isla dinámica, arrastre y estadísticas.
+- La isla reproduciendo baja el uso de GPU (7,3 % → 0,3 %).
+- Ajustes con pestañas y animaciones pulidas.
+- Corregidos 4 bugs de la revisión de las fases 1–6.
+
+### Avisos de notificaciones
+
+- Copia silenciosa de las notificaciones de Windows (para usar con *No molestar*), sin sonido ni robo de foco.
 
 ### Video acoplado (PiP del navegador)
 
@@ -11,6 +25,8 @@ Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 - Con la isla colapsada se oculta (`"hide"`) o flota 320 × 180 debajo de la isla (`"float"`). También se oculta mientras Ajustes o el selector de fuentes tapan el reproductor.
 - Comandos `pip_set_slot`, `pip_undock` y `pip_status`; eventos `pip-docked` y `pip-drop-hover`. El hilo duerme con la opción apagada o con la ventana oculta y sin video.
 - Frontend: diseños `cinema` y `art`, zona para soltar, botón para desacoplar y pestaña *Video* en Ajustes. Las opciones `pip_*` ya se guardan. Las letras se ocultan en modo cine.
+- En modo carátula el hueco toma el tamaño real que deja el navegador (su mínimo de PiP es mayor que 260 × 146): evento `pip-size`; si pasa de 300 px de ancho, el título va debajo.
+- Correcciones: el video ya no tapa el selector de fuentes, Ajustes entra entero en la ventana en modo carátula y el video flotante ya no aparece un instante en el centro de la pantalla al colapsar.
 
 ## [0.2.0] — 2026-10-27
 

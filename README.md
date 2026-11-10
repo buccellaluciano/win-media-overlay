@@ -4,7 +4,7 @@ Una **isla dinámica** flotante, elegante y ultraligera para controlar la reprod
 
 Construida con **Tauri 2 + Rust + HTML/CSS/JS vanilla**, compilada **100 % offline** con las librerías locales del equipo. Sin frameworks JS, sin npm, sin CDNs.
 
-**Versión 0.2.0.**
+**Versión 1.0.0.**
 
 ---
 
@@ -82,6 +82,7 @@ Arrastrá la ventana *imagen en imagen* de Chrome, Edge, Brave o Firefox y solta
 - **Icono en la bandeja**: clic izquierdo muestra/oculta; clic derecho → *Mostrar / Ocultar* y **Salir**.
 - **Atajo global** por defecto `Ctrl + Shift + Espacio`, configurable (modificadores + tecla) con `RegisterHotKey`. Si otra app lo tiene registrado, se avisa en rojo bajo el bind y se conserva el atajo anterior.
 - **Respetar pantalla completa**: en fullscreen exclusivo (D3D) la isla se oculta para no minimizar el juego y el atajo muestra sin robar el foco.
+- **Botones rápidos del encabezado**: activar/desactivar la isla dinámica, permitir arrastrar, estadísticas y mostrar al pasar el ratón, sin abrir Ajustes. Con un video acoplado aparece también el botón para desacoplarlo.
 - **Escape**: cierra el popover/ajustes o colapsa la isla (según el estado).
 - **Auto-hide on blur** (solo en el modo clásico sin isla).
 - Sin bordes, sin icono en la barra de tareas (`skipTaskbar`).
@@ -89,6 +90,10 @@ Arrastrá la ventana *imagen en imagen* de Chrome, Edge, Brave o Firefox y solta
 ---
 
 ## 🚀 Cómo ejecutarlo
+
+**Versión portable (recomendada):** descargá `WMO-1.0.0-win64.zip` desde *Releases*, descomprimilo y hacé doble clic en `Iniciar.bat` (o en `wmo.exe`). No requiere instalación.
+
+**Desde el código fuente** (después de `cargo build --release --offline`):
 
 1. **Doble clic en `run.bat`** en la carpeta del proyecto.
 2. O ejecuta el binario compilado:
@@ -170,9 +175,9 @@ wmo/
 ├── Cargo.lock          # Versiones exactas (compilación offline)
 ├── build.rs            # Script de compilación de Tauri
 ├── tauri.conf.json     # Ventana, CSP estricta y metadatos del bundle
-├── AGENTS.md           # Reglas para agentes que trabajen en el repo
-├── TAREAS_DEEPSEEK.md  # Especificación por fases
 ├── CHANGELOG.md        # Historial de cambios
+├── PIP_DOCK.md         # Diseño del video acoplado (PiP)
+├── packaging/          # Iniciar.bat y LEEME.txt del zip de la release
 ├── icons/              # Iconos de la aplicación
 ├── capabilities/       # Permisos ACL de Tauri 2
 ├── run.bat             # Lanzador rápido

@@ -1,6 +1,6 @@
 # Video acoplado (PiP del navegador) — plan de trabajo
 
-Estado: **implementado, falta la prueba manual** (pasos 3: prueba con navegadores y consumo). Backend `53483b5`, frontend `5693312`.
+Estado: **terminado y probado** (versión 1.0.0). Backend `53483b5`, frontend `5693312`, correcciones `9e773d9`, `e4147db`, `7638d9e` y `6e71d01`. Este archivo queda como registro del diseño.
 
 Desvíos del plan:
 
@@ -151,14 +151,14 @@ ya está.
 ### 3. Verificación
 - [x] `cargo build --release --offline` y `cargo clippy --offline` sin warnings nuevos.
 - [x] El grep de APIs prohibidas de `AGENTS.md` no devuelve nada.
-- [ ] Prueba manual con Chrome o Edge (YouTube) y Firefox:
+- [x] Prueba manual con Chrome o Edge (YouTube) y Firefox:
   - acoplar soltando, en los dos diseños;
   - mover la app y comprobar que el video la sigue;
   - colapsar a la isla con "hide" y con "float";
   - desacoplar arrastrando y con el botón;
   - cerrar el PiP desde el navegador;
   - "Salir" desde la bandeja y comprobar que el PiP vuelve a su lugar.
-- [ ] Revisar que con la opción apagada, o sin PiP, el consumo de CPU no cambie (Administrador de tareas).
+- [x] Revisar que con la opción apagada, o sin PiP, el consumo de CPU no cambie (Administrador de tareas).
 - [x] Actualizar `README.md` (función y lista de seguridad: `EnumWindows`, `SetWindowPos` sobre la ventana
   PiP, sin hooks) y `CHANGELOG.md`.
 - [x] Un commit por bloque (backend, frontend), con el trailer `Co-Authored-By` que use el repo.
