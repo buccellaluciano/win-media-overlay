@@ -437,6 +437,8 @@ let lastHitKey = "";
 
 function reportHitRect() {
   const r = liquidCard.getBoundingClientRect();
+  // The slot has its own dedupe: overlays (source popover) change it without resizing the card
+  reportPipSlot();
   const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)},${pointerCapture}`;
   if (key === lastHitKey) return;
   lastHitKey = key;
@@ -447,7 +449,6 @@ function reportHitRect() {
     height: r.height,
     capture: pointerCapture,
   }).catch(() => {});
-  reportPipSlot();
 }
 
 // Docked video: where the backend must put the browser's PiP window (CSS px in the window).
@@ -902,6 +903,9 @@ function applyIslandMode(mode) {
 function updateIslandPin() {
   const pinned = !!(isSettingsOpen || isSourcePopoverOpen);
   invoke("set_island_pinned", { pinned }).catch(() => {});
+  // Settings/popover cover the player: hide the docked video now (and bring it back on close),
+  // even when the card keeps its size
+  reportPipSlot();
 }
 
 // =========================================================
