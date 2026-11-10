@@ -8,6 +8,7 @@ mod fullscreen;
 mod hotkey;
 mod media;
 mod notifications;
+mod pip;
 mod position;
 mod sysstats;
 mod volume;
@@ -304,6 +305,7 @@ fn update_app_config(
     *state.config.lock().unwrap_or_else(|e| e.into_inner()) = new_config.clone();
     sysstats::wake();
     notifications::wake();
+    pip::sync(&app);
     // The toast window follows the theme/opacity of the main one
     let _ = app.emit_to(notifications::NOTIFY_LABEL, "config-changed", &new_config);
 
@@ -347,6 +349,7 @@ fn set_hit_rect(
 fn hide_window(window: WebviewWindow) -> Result<(), String> {
     let res = window.hide().map_err(|e| e.to_string());
     sysstats::wake();
+    pip::sync(window.app_handle());
     res
 }
 
@@ -418,6 +421,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         let _ = app.emit("island-visibility", true);
     }
     sysstats::wake();
+    pip::sync(app);
 }
 
 fn logs_dir() -> PathBuf {
@@ -591,6 +595,7 @@ fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: 
         state.island_ignore.store(false, Ordering::Relaxed);
         let _ = win.hide();
         let _ = app.emit("island-mode", IslandModePayload { mode: mode.as_str() });
+        pip::sync(app);
         return;
     }
 
@@ -612,6 +617,7 @@ fn set_island_mode_internal(app: &tauri::AppHandle, mode: IslandMode, activate: 
         }
     }
     let _ = app.emit("island-mode", IslandModePayload { mode: mode.as_str() });
+    pip::sync(app);
 }
 
 #[tauri::command]
@@ -694,6 +700,9 @@ fn main() {
             notifications::notify_layout,
             notifications::notify_access,
             notifications::notify_test,
+            pip::pip_set_slot,
+            pip::pip_undock,
+            pip::pip_status,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
@@ -745,7 +754,11 @@ fn main() {
                     .tooltip("WMO")
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "toggle" => toggle_main_window(app),
-                        "quit" => app.exit(0),
+                        "quit" => {
+                            // Give the docked video back to the browser before leaving
+                            pip::release(app);
+                            app.exit(0);
+                        }
                         _ => {}
                     })
                     .on_tray_icon_event(|tray, event| {
@@ -772,6 +785,9 @@ fn main() {
                 notifications::setup_window(&notify);
             }
             notifications::spawn(app.handle().clone());
+
+            // Docked browser PiP video (sleeps while disabled or with nothing to follow)
+            pip::spawn(app.handle().clone());
 
             // Background media polling loop
             let app_handle_polling = app.handle().clone();
@@ -1129,6 +1145,8 @@ fn main() {
                 WindowEvent::Moved(_) => {
                     // The island is always top-center: a drag just moves it temporarily and it
                     // recenters on the current monitor on the next show/reveal. Nothing to persist.
+                    // A docked video follows the card.
+                    pip::sync(&app_handle_events);
                 }
                 _ => {}
             });
