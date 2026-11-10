@@ -414,10 +414,11 @@ fn apply(ctx: &Ctx, st: &mut Pip) -> Option<Event> {
             None => hide(st),
         }
     } else if ctx.float && collapsed {
-        let (cx, below) = match ctx.hit {
-            Some((x, y, w, hgt)) => (x + w / 2.0, y + hgt + 8.0),
-            None => (240.0, 50.0),
-        };
+        // Fixed island geometry (style.css: 6 px top margin, 36 px compact / 56 px activity,
+        // centered), not the reported card box: right after collapsing that box is still the
+        // expanded player's until the CSS morph ends, and the video flashed mid-screen
+        let pill_h = if ctx.mode == IslandMode::Activity { 56.0 } else { 36.0 };
+        let (cx, below) = (crate::WINDOW_W / 2.0, 6.0 + pill_h + 8.0);
         let r = ctx.to_screen(cx - FLOAT_W / 2.0, below, FLOAT_W, FLOAT_H);
         place(st, r, ctx.main);
     } else if ctx.float {
