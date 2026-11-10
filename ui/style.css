@@ -63,6 +63,9 @@
   --card-tint: rgba(var(--card-rgb), var(--card-opacity));
   --card-gradient: linear-gradient(0deg, transparent, transparent);
   --card-border: rgba(255, 255, 255, 0.24);
+  /* Outer shadow must fade within ~5 px sideways: the card sits 6 px from the edges of a
+     fixed 480 px window, and a wider shadow is cut there into a visible box. Use a negative
+     spread (blur + spread <= 5) so it falls downwards instead. */
   --card-shadow:
     0 3px 8px -5px rgba(0, 0, 0, 0.60),
     inset 0 1px 1px 0 rgba(255, 255, 255, 0.40),
@@ -179,7 +182,7 @@
   --card-gradient: linear-gradient(160deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.05));
   --card-border: rgba(255, 255, 255, 0.85);
   --card-shadow:
-    0 10px 30px -12px rgba(20, 30, 60, 0.45),
+    0 12px 20px -15px rgba(20, 30, 60, 0.55),
     inset 0 1px 1px rgba(255, 255, 255, 0.90),
     inset 0 -1px 1px rgba(0, 0, 0, 0.05);
   --blur-card: 42px;
@@ -272,7 +275,7 @@
   --card-border: rgba(255, 255, 255, 0.14);
   --card-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.04),
-    0 8px 24px rgba(0, 0, 0, 0.80);
+    0 12px 20px -15px rgba(0, 0, 0, 0.90);
   --card-backdrop: none;
   --menu-backdrop: none;
   --menu-bg: rgba(10, 10, 12, 0.98);
@@ -325,7 +328,7 @@
   --card-gradient: linear-gradient(0deg, transparent, transparent);
   --card-border: rgba(0, 0, 0, 0.10);
   --card-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.18),
+    0 12px 20px -15px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.70);
   --blur-card: 20px;
   --accent-rgb: 0, 95, 184;
@@ -407,7 +410,7 @@
   --card-gradient: linear-gradient(160deg, rgba(var(--accent-rgb), 0.16), rgba(0, 0, 0, 0) 55%);
   --card-border: rgba(var(--accent-rgb), 0.55);
   --card-shadow:
-    0 0 24px rgba(var(--accent-rgb), 0.35),
+    0 0 4px rgba(var(--accent-rgb), 0.50),
     inset 0 0 18px rgba(var(--accent-rgb), 0.12);
   --text-glow: 0 0 10px rgba(var(--accent-rgb), 0.45);
   --text-secondary: rgba(225, 235, 255, 0.72);
@@ -462,7 +465,7 @@
   --card-gradient: linear-gradient(135deg, rgba(255, 138, 76, 0.30), rgba(214, 51, 132, 0.30));
   --card-border: rgba(255, 196, 150, 0.35);
   --card-shadow:
-    0 10px 30px -10px rgba(60, 10, 30, 0.65),
+    0 12px 20px -15px rgba(60, 10, 30, 0.75),
     inset 0 1px 1px rgba(255, 210, 180, 0.35);
   --accent-rgb: 255, 138, 76;
   --accent-dark: #D63384;
@@ -2438,7 +2441,7 @@ label.set-row:active .ios-switch:checked + .switch-slider::after {
 .liquid-card.pip-drop {
   border-color: var(--accent-color);
   box-shadow: var(--card-shadow), 0 0 0 2px rgba(var(--accent-rgb), 0.55),
-    0 0 22px rgba(var(--accent-rgb), 0.45);
+    0 0 5px rgba(var(--accent-rgb), 0.55); /* <= 5 px: see --card-shadow */
 }
 
 .liquid-card.pip-drop .pip-drop-hint {
