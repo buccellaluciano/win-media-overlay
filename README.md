@@ -181,7 +181,8 @@ wmo/
 ├── CHANGELOG.md        # Historial de cambios
 ├── PIP_DOCK.md         # Diseño del video acoplado (PiP)
 ├── packaging/          # Iniciar.bat y LEEME.txt del zip de la release
-├── icons/              # Iconos de la aplicación
+├── icons/              # Monograma de la app (generado con tools/make-icon.ps1)
+├── tools/              # make-icon.ps1: dibuja el ícono y arma el .ico (16–256 px)
 ├── capabilities/       # Permisos ACL de Tauri 2
 ├── run.bat             # Lanzador rápido
 ├── src/

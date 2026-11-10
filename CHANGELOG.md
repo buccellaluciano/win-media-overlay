@@ -8,6 +8,10 @@ Todas las fechas en formato ISO. Una entrada por fase del encargo original.
 
 - **Letras para videos:** los títulos de YouTube y similares ("Michael Jackson - Smooth Criminal (Official Video)" del canal "michaeljacksonVEVO") no coincidían con nada en LRCLIB. Nuevo `ui/lyrics-query.js`: quita etiquetas de subida (Official Video, Lyrics/Letra, HD/4K, Remastered, feat.…), separa "Artista - Canción" (también "Canción - Artista"), descarta lo que sigue a " | " y limpia el canal (VEVO, " - Topic", Official). Se busca primero lo que informa el reproductor y después hasta dos variantes limpias; entre los resultados se prefiere el de duración más cercana.
 
+### Cambiado
+
+- **Ícono nuevo:** monograma propio (W blanca sobre grafito con la píldora de la isla en azul), en 16–256 px y con trazo reforzado en los tamaños de la bandeja. Reemplaza la nube anterior y se quitó una foto que no correspondía. `tools/make-icon.ps1` lo regenera.
+
 ### Corregido
 
 - Elegir solo un tema no activaba el botón Guardar.
